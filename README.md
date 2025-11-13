@@ -1,509 +1,661 @@
-# gradleInit
+# gradleInit v1.1.0 - Complete Documentation
 
-A Python-based project initializer for modern Kotlin/Gradle multiproject builds with convention plugins, version catalogs, and integrated tooling.
+## Overview
+
+**gradleInit v1.1.0** is a complete rewrite in modern, modular Python with all features in a single file. It combines professional software engineering with practical usability.
+
+## Architecture
+
+### Design Principles
+
+1. **Single File** - Everything in one `gradleInit.py`
+2. **Modular** - Clear class separation and responsibilities
+3. **Object-Oriented** - Classes for major components
+4. **Testable** - Methods designed for easy unit testing
+5. **Type-Safe** - Dataclasses with type hints
+6. **Modern Python** - Python 3.7+ features
+
+### Class Structure
+
+```
+gradleInit.py (1600+ lines)
+├── Utilities
+│   ├── Color                     # Terminal colors
+│   ├── FileUtils                 # File operations
+│   └── CommandRunner             # Command execution
+│
+├── Data Classes
+│   ├── VersionInfo               # Semantic versioning
+│   ├── MavenArtifact            # Maven artifacts
+│   ├── SharedCatalogConfig      # Shared catalog config
+│   ├── MavenCentralLibrary      # Library tracking
+│   ├── SpringBootConfig         # Spring Boot settings
+│   ├── DependenciesConfig       # Dependencies config
+│   ├── UpdateConfig             # Update preferences
+│   └── GradleInitConfig         # Complete config
+│
+├── Managers
+│   ├── VersionCatalogManager    # Version catalog operations
+│   ├── ConfigManager            # .gradleInit config
+│   ├── UpdateManager            # Update coordination
+│   └── SelfUpdater              # Script self-update
+│
+├── Integrations
+│   ├── MavenCentralClient       # Maven Central API
+│   ├── SpringBootBOM            # Spring Boot BOM
+│   └── ProjectCreator           # Project creation
+│
+└── CLI
+    ├── create_parser()          # Argument parser
+    └── main()                   # Entry point
+```
 
 ## Features
 
-- **Modern Gradle Setup**: Gradle 9.0 with Kotlin DSL, JDK 21 target
-- **Convention Plugins**: Reusable build logic in composite build pattern
-- **Version Catalog**: Centralized dependency management with type-safe accessors
-- **Git Metadata Integration**: Automatic version information from git (commit, branch, author, timestamp)
-- **Testing Framework**: JUnit 5, Kotest, MockK, Coroutines Test
-- **Code Quality**: detekt for static analysis, Kover for coverage, Dokka for documentation
-- **Self-Update**: Update script and version catalogs from GitHub
-- **CI/CD Ready**: GitHub Actions workflow included
-- **Backend Stack**: Pre-configured for Ktor, Koin, Exposed, Clikt, kotlinx-serialization
+### 1. Shared Version Catalog
 
-## Requirements
-
-- Python 3.7+
-- Git
-- JDK 21+ (for created projects)
-
-## Installation
+Use a shared `libs.versions.toml` from URL or file for all projects:
 
 ```bash
-git clone https://github.com/stotz/gradleInit.git
-cd gradleInit
-chmod +x gradleInit.py
+# From URL
+gradleInit --sync-shared-catalog https://company.com/shared-catalog.toml
+
+# From local file
+gradleInit --sync-shared-catalog ~/company/shared-catalog.toml
+
+# From network drive
+gradleInit --sync-shared-catalog //fileserver/shared/catalog.toml
 ```
 
-## Usage
+**Configuration in .gradleInit:**
 
-### Create New Project
+```toml
+[dependencies.shared_catalog]
+enabled = true
+source = "https://company.com/shared-catalog.toml"
+sync_on_update = true
+override_local = false  # Keep local overrides
+```
+
+**Use Cases:**
+
+1. **Company-wide Standards**
+   ```toml
+   # Company shared-catalog.toml
+   [versions]
+   kotlin = "2.2.0"
+   jackson = "2.18.2"
+   
+   # All company projects use same versions
+   ```
+
+2. **Team Conventions**
+   ```bash
+   # Team lead maintains catalog on GitHub
+   # Team members sync: gradleInit --sync-shared-catalog <url>
+   ```
+
+3. **Multi-Project Coordination**
+   ```bash
+   # Microservices share versions from central file
+   # Update once, sync everywhere
+   ```
+
+### 2. Maven Central Integration
+
+Automatic updates from Maven Central with intelligent policies:
+
+```python
+# Check single library
+maven_client = MavenCentralClient()
+has_update, recommended, newer = maven_client.check_for_updates(
+    current_version="3.0.1",
+    group="io.ktor",
+    artifact="ktor-server-core",
+    update_policy="last-stable"
+)
+```
+
+**Update Policies:**
+
+- **pinned**: Never update
+- **last-stable**: Latest stable (no RC/SNAPSHOT)
+- **latest**: Including pre-releases
+- **major-only**: Only major versions
+- **minor-only**: Only minor/patch
+
+**Breaking Change Detection:**
+
+```python
+is_breaking, reason = MavenCentralClient.check_breaking_changes(
+    "2.3.0",  # Current
+    "3.0.0"   # New
+)
+# (True, "Major version change: 2.x -> 3.x")
+```
+
+### 3. Spring Boot BOM Sync
+
+Sync with Spring Boot's tested dependency versions:
+
+```bash
+# Sync all compatible versions
+gradleInit --sync-spring-boot 3.5.7
+
+# Dry run first
+gradleInit --sync-spring-boot 3.5.7 --dry-run
+```
+
+**What it syncs:**
+
+- Jackson (2.18.2)
+- Hibernate (6.6.4.Final)
+- Netty (4.1.115.Final)
+- Reactor
+- SLF4J, Logback
+- JUnit, Mockito
+- And 600+ more
+
+### 4. .gradleInit Configuration
+
+Persistent project configuration:
+
+```toml
+# .gradleInit
+project_name = "my-api"
+project_version = "1.0.0"
+project_group = "com.company"
+
+[dependencies.shared_catalog]
+enabled = true
+source = "https://company.com/catalog.toml"
+override_local = false
+
+[dependencies.spring_boot]
+enabled = true
+version = "3.5.7"
+compatibility_mode = "last-stable"
+
+[[dependencies.maven_central_libraries]]
+group = "io.ktor"
+artifact = "ktor-server-core"
+version = "3.0.1"
+update_policy = "last-stable"
+
+[update]
+auto_check = true
+check_interval = "weekly"
+notify_breaking_changes = true
+```
+
+### 5. Intelligent Update Management
+
+Coordinated updates across all sources:
+
+```bash
+# Check all configured updates
+gradleInit --check-updates
+
+# Output:
+# === Checking for Updates ===
+#
+# Maven Central Libraries:
+#
+#   io.ktor:ktor-server-core
+#     Current:     3.0.1
+#     Recommended: 3.0.2
+#     Policy:      last-stable
+#
+# Shared Catalog (https://company.com/catalog.toml):
+#     [versions] kotlin: 2.1.0 -> 2.2.0
+#     [versions] jackson: 2.17.0 -> 2.18.2
+#
+# === Summary ===
+#   Total updates available: 3
+#   Breaking changes: 0
+```
+
+## Usage Examples
+
+### Example 1: Create Project with Shared Catalog
+
+```bash
+# Create project
+gradleInit my-api --group com.company --save-config
+
+cd my-api
+
+# Configure shared catalog in .gradleInit
+cat >> .gradleInit << EOF
+[dependencies.shared_catalog]
+enabled = true
+source = "https://company.com/shared-catalog.toml"
+sync_on_update = true
+EOF
+
+# Initial sync
+gradleInit --sync-shared-catalog https://company.com/shared-catalog.toml
+
+# Weekly updates
+gradleInit --check-updates
+```
+
+### Example 2: Multi-Project Setup
+
+```bash
+# Setup 3 microservices with shared catalog
+
+# Shared catalog on fileserver
+SHARED_CATALOG="//fileserver/shared/microservices-catalog.toml"
+
+# Service 1
+gradleInit user-service --save-config
+cd user-service
+gradleInit --sync-shared-catalog "$SHARED_CATALOG"
+cd ..
+
+# Service 2
+gradleInit order-service --save-config
+cd order-service
+gradleInit --sync-shared-catalog "$SHARED_CATALOG"
+cd ..
+
+# Service 3
+gradleInit payment-service --save-config
+cd payment-service
+gradleInit --sync-shared-catalog "$SHARED_CATALOG"
+cd ..
+
+# Update shared catalog once
+# All services sync: gradleInit --sync-shared-catalog "$SHARED_CATALOG"
+```
+
+### Example 3: Existing Project Migration
+
+```bash
+cd my-existing-project
+
+# Generate .gradleInit from project
+gradleInit --generate-config
+
+# Configure Maven Central tracking
+cat >> .gradleInit << EOF
+[[dependencies.maven_central_libraries]]
+group = "io.ktor"
+artifact = "ktor-server-core"
+version = "3.0.1"
+update_policy = "last-stable"
+
+[[dependencies.maven_central_libraries]]
+group = "io.insert-koin"
+artifact = "koin-core"
+version = "4.0.0"
+update_policy = "minor-only"
+EOF
+
+# Check for updates
+gradleInit --check-updates
+```
+
+### Example 4: Spring Boot Project
+
+```bash
+# Create project
+gradleInit spring-api --group com.company --save-config
+
+cd spring-api
+
+# Configure Spring Boot in .gradleInit
+cat >> .gradleInit << EOF
+[dependencies.spring_boot]
+enabled = true
+version = "3.5.7"
+compatibility_mode = "last-stable"
+starters = ["web", "data-jpa", "security"]
+EOF
+
+# Sync with Spring Boot BOM
+gradleInit --sync-spring-boot 3.5.7
+
+# Check for Spring Boot updates
+gradleInit --check-updates
+```
+
+### Example 5: Conservative Production Setup
+
+```bash
+gradleInit production-service --save-config
+
+# Conservative config
+cat > .gradleInit << EOF
+project_name = "production-service"
+project_version = "2.5.0"
+project_group = "com.company"
+
+[dependencies]
+strategy = "manual"
+
+[dependencies.shared_catalog]
+enabled = false
+
+[dependencies.spring_boot]
+enabled = true
+version = "3.4.5"  # Not latest, but stable
+compatibility_mode = "pinned"  # Don't auto-update
+
+[[dependencies.maven_central_libraries]]
+group = "io.ktor"
+artifact = "ktor-server-core"
+version = "2.3.5"
+update_policy = "minor-only"  # Only patches
+
+[update]
+auto_check = false
+notify_breaking_changes = true
+EOF
+```
+
+## Code Quality
+
+### Object-Oriented Design
+
+**Clear Responsibilities:**
+
+```python
+# Version Catalog - manages TOML files
+catalog_manager = VersionCatalogManager(project_dir)
+catalog_manager.sync_with_shared(source, override_local)
+
+# Maven Central - API client
+maven_client = MavenCentralClient()
+maven_client.get_latest_versions(group, artifact)
+
+# Config - persistence
+config_manager = ConfigManager(project_dir)
+config_manager.save(config)
+
+# Updates - coordination
+update_manager = UpdateManager(project_dir, config)
+update_manager.check_all_updates()
+```
+
+### Dataclasses
+
+Type-safe configuration:
+
+```python
+@dataclass
+class GradleInitConfig:
+    """Complete configuration with type hints."""
+    project_name: str
+    project_version: str = "0.1.0-SNAPSHOT"
+    dependencies: DependenciesConfig = field(default_factory=DependenciesConfig)
+    
+# Usage
+config = GradleInitConfig(
+    project_name="my-api",
+    project_group="com.company"
+)
+```
+
+### Error Handling
+
+Graceful failures:
+
+```python
+def load_catalog(self) -> Optional[Dict]:
+    """Load catalog, return None on failure."""
+    try:
+        return toml.load(self.catalog_path)
+    except Exception as e:
+        print_error(f"Failed to load catalog: {e}")
+        return None
+```
+
+### Modularity
+
+Easy to test:
+
+```python
+# Test version parsing
+version = VersionInfo.parse("3.5.7-RC2")
+assert version.major == 3
+assert not version.is_stable()
+
+# Test version comparison
+v1 = VersionInfo.parse("3.0.1")
+v2 = VersionInfo.parse("3.1.0")
+assert v1.compare(v2) == -1
+
+# Test Maven Central client
+artifacts = MavenCentralClient.get_latest_versions(
+    "io.ktor",
+    "ktor-server-core",
+    stable_only=True
+)
+assert len(artifacts) > 0
+```
+
+## CLI Reference
+
+### Project Creation
 
 ```bash
 # Basic project
-python gradleInit.py my-project
+gradleInit my-project
 
-# With custom package
-python gradleInit.py my-project --package com.company.myproject
+# With config
+gradleInit my-project --group com.company --save-config
 
-# With modules
-python gradleInit.py my-project --modules app:application:Main,core,domain,data
-
-# With git initialization
-python gradleInit.py my-project --modules app:application:Main --git-init
+# Specify version
+gradleInit my-project --version 1.0.0
 ```
 
-### Module Types
+### Configuration
 
-**Library Module** (default):
 ```bash
---modules core
-```
-Creates a library with `kotlin-library-conventions` plugin and standard test dependencies.
+# Show current config
+gradleInit --show-config
 
-**Application Module**:
-```bash
---modules app:application:MainClass
+# Generate from existing project
+gradleInit --generate-config
 ```
-Creates an application with `kotlin-application-conventions` plugin, logging, git properties, and main class.
+
+### Updates
+
+```bash
+# Check all updates
+gradleInit --check-updates
+
+# Dry run
+gradleInit --check-updates --dry-run
+```
+
+### Shared Catalog
+
+```bash
+# Sync from URL
+gradleInit --sync-shared-catalog https://example.com/catalog.toml
+
+# Sync from file
+gradleInit --sync-shared-catalog ~/shared/catalog.toml
+
+# Dry run
+gradleInit --sync-shared-catalog <source> --dry-run
+```
+
+### Spring Boot
+
+```bash
+# Sync with Spring Boot BOM
+gradleInit --sync-spring-boot 3.5.7
+
+# Dry run
+gradleInit --sync-spring-boot 3.5.7 --dry-run
+```
 
 ### Self-Update
 
 ```bash
-# Check for updates
-python gradleInit.py --self-update --dry-run
+# Check for script updates
+gradleInit --self-update --dry-run
 
-# Apply update
-python gradleInit.py --self-update
+# Update script
+gradleInit --self-update
 
-# Show version
-python gradleInit.py --version
+# Force update
+gradleInit --self-update --force
 ```
 
-### Update Version Catalog
+## Integration Examples
+
+### GitHub Actions
+
+```yaml
+name: Dependency Updates
+
+on:
+  schedule:
+    - cron: '0 0 * * 1'  # Weekly
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: pip install toml
+      
+      - name: Check updates
+        run: |
+          python gradleInit.py --check-updates > updates.txt
+      
+      - name: Create PR
+        if: ${{ hashFiles('updates.txt') != '' }}
+        uses: peter-evans/create-pull-request@v5
+        with:
+          title: 'chore: dependency updates available'
+          body-path: updates.txt
+```
+
+### Pre-Commit Hook
 
 ```bash
-# Preview changes
-python gradleInit.py --update-versions /path/to/project --dry-run
+#!/bin/bash
+# .git/hooks/pre-commit
 
-# Apply update
-python gradleInit.py --update-versions /path/to/project
+# Check for updates weekly
+LAST_CHECK=$(cat .last-update-check 2>/dev/null || echo 0)
+NOW=$(date +%s)
+WEEK=604800
 
-# Refresh dependencies
-cd /path/to/project
-./gradlew --refresh-dependencies
-```
-
-## Project Structure
-
-```
-my-project/
-├── .editorconfig                       # Editor configuration
-├── .gitignore                          # Git ignore rules
-├── gradle.properties                   # Gradle settings
-├── settings.gradle.kts                 # Project settings
-├── build-logic/                        # Convention plugins
-│   ├── settings.gradle.kts
-│   ├── build.gradle.kts
-│   ├── gradle/libs.versions.toml
-│   └── src/main/kotlin/
-│       ├── kotlin-common-conventions.gradle.kts
-│       ├── kotlin-library-conventions.gradle.kts
-│       └── kotlin-application-conventions.gradle.kts
-├── config/detekt/
-│   ├── detekt.yml                      # detekt configuration
-│   └── baseline.xml
-├── gradle/
-│   ├── libs.versions.toml              # Version catalog
-│   └── wrapper/
-├── .github/workflows/
-│   └── ci.yml                          # GitHub Actions
-└── [modules]/
-    ├── app/                            # Application module
-    │   ├── src/main/kotlin/
-    │   ├── src/main/resources/
-    │   │   ├── version.properties
-    │   │   ├── logback.xml
-    │   │   └── git.properties          # Generated at build
-    │   └── build.gradle.kts
-    └── core/                           # Library module
-        ├── src/main/kotlin/
-        ├── src/test/kotlin/
-        └── build.gradle.kts
-```
-
-## Convention Plugins
-
-### kotlin-common-conventions
-
-Shared configuration for all Kotlin modules:
-- Kotlin JVM with toolchain 21
-- Compiler options: strict JSR305, opt-in support
-- JUnit Platform test configuration
-- detekt static analysis
-- Kover coverage reporting
-- Dokka documentation generation
-
-### kotlin-library-conventions
-
-For library modules:
-- Extends `kotlin-common-conventions`
-- Java Library plugin
-- Standard test dependencies
-- JAR manifest configuration
-
-### kotlin-application-conventions
-
-For application modules:
-- Extends `kotlin-common-conventions`
-- Application plugin
-- Git properties plugin (commit ID, branch, author, timestamp)
-- Logging dependencies (kotlin-logging, Logback)
-- Version properties in resources
-- Custom `printVersion` task
-
-## Version Catalog
-
-Pre-configured dependencies in `gradle/libs.versions.toml`:
-
-**Core:**
-- kotlin = 2.2.0
-- jvm-target = 21
-
-**Testing:**
-- junit-jupiter = 5.11.3
-- kotest = 5.9.1
-- mockk = 1.13.13
-- kotlinx-coroutines-test = 1.9.0
-
-**Backend (Optional):**
-- ktor = 3.0.1
-- koin = 4.0.0
-- exposed = 0.56.0
-- clikt = 5.0.1
-
-**Code Quality:**
-- detekt = 1.23.7
-- kover = 0.9.0
-- dokka = 2.0.0
-
-**Bundles:**
-- `testing`: JUnit, Kotest, MockK, Coroutines Test
-- `logging`: kotlin-logging, SLF4J, Logback
-- `ktor-server`: Server core, Netty, Content negotiation, Serialization
-- `ktor-client`: Client core, CIO, Content negotiation
-- `koin`: Core, Ktor integration
-- `exposed`: Core, DAO, JDBC
-
-## Gradle Tasks
-
-### Building
-```bash
-./gradlew build                # Build all modules
-./gradlew :module:build       # Build specific module
-./gradlew clean               # Clean build outputs
-```
-
-### Testing
-```bash
-./gradlew test                # Run tests
-./gradlew koverHtmlReport     # Generate coverage report
-./gradlew koverVerify         # Verify coverage thresholds
-```
-
-### Code Quality
-```bash
-./gradlew detekt              # Run static analysis
-./gradlew detektBaseline      # Create/update baseline
-```
-
-### Documentation
-```bash
-./gradlew dokkaHtml           # Generate KDoc HTML
-```
-
-### Running
-```bash
-./gradlew :app:run            # Run application
-./gradlew printVersion        # Show version with git metadata
-```
-
-## Git Metadata
-
-Application modules automatically include git information accessible at runtime:
-
-```kotlin
-val gitProps = Properties().apply {
-    load(this::class.java.getResourceAsStream("/git.properties"))
-}
-
-println("Branch: ${gitProps["git.branch"]}")
-println("Commit: ${gitProps["git.commit.id.abbrev"]}")
-println("Author: ${gitProps["git.commit.user.name"]}")
-println("Time: ${gitProps["git.commit.time"]}")
-```
-
-Or via Gradle:
-```bash
-./gradlew printVersion
-```
-
-## Configuration
-
-### gradle.properties
-
-```properties
-# Gradle settings
-org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
-org.gradle.parallel=true
-org.gradle.caching=true
-org.gradle.configuration-cache=true
-
-# Kotlin settings
-kotlin.code.style=official
-kotlin.incremental=true
-kotlin.caching.enabled=true
-
-# Project
-version=0.1.0-SNAPSHOT
-group=com.example
-```
-
-### detekt
-
-Comprehensive rule configuration in `config/detekt/detekt.yml`:
-- Complexity checks
-- Code smells
-- Coroutine best practices
-- Exception handling
-- Naming conventions
-- Performance optimizations
-- Potential bugs
-- Style rules
-
-## CI/CD
-
-GitHub Actions workflow (`.github/workflows/ci.yml`) runs on push and pull requests:
-- Checkout with full git history
-- JDK 21 setup with Gradle cache
-- Build all modules
-- Run tests
-- Generate coverage report
-- Run detekt analysis
-- Archive artifacts
-- Publish test results
-
-## Command Reference
-
-### Project Creation
-
-| Option | Description | Example |
-|--------|-------------|---------|
-| `project_name` | Project name (required) | `my-project` |
-| `--package PKG` | Base package name | `--package com.company.project` |
-| `--group GRP` | Group ID | `--group com.company` |
-| `--modules MODS` | Comma-separated modules | `--modules app:application:Main,core` |
-| `--git-init` | Initialize git repository | `--git-init` |
-| `--no-verify` | Skip Gradle verification | `--no-verify` |
-| `--template-url URL` | Custom template repository | `--template-url https://...` |
-| `--template-dir DIR` | Local template directory | `--template-dir ~/templates` |
-
-### Update Commands
-
-| Option | Description | Example |
-|--------|-------------|---------|
-| `--self-update` | Update script from GitHub | `--self-update` |
-| `--update-versions DIR` | Update version catalog | `--update-versions ./project` |
-| `--dry-run` | Preview changes only | `--dry-run` |
-| `--force` | Force update | `--force` |
-| `--version` | Show script version | `--version` |
-
-## Examples
-
-### Backend API Project
-
-```bash
-python gradleInit.py backend-api \
-  --package com.company.api \
-  --group com.company \
-  --modules app:application:Application,core,domain,data,web \
-  --git-init
-
-cd backend-api
-./gradlew build
-```
-
-### CLI Application
-
-```bash
-python gradleInit.py my-cli \
-  --package com.company.cli \
-  --modules app:application:CliApp \
-  --git-init
-
-# Add Clikt dependency to app/build.gradle.kts
-cd my-cli
-./gradlew :app:run
-```
-
-### Microservices Structure
-
-```bash
-python gradleInit.py my-services \
-  --package com.company.services \
-  --modules \
-    user-service:application:UserService,\
-    order-service:application:OrderService,\
-    shared-domain,\
-    shared-core \
-  --git-init
-```
-
-## Customization
-
-### Using a Fork
-
-```bash
-# Fork the repository on GitHub
-# Clone your fork
-git clone https://github.com/yourcompany/gradleInit.git
-
-# Customize template files in template/
-# Modify convention plugins in template/build-logic/src/main/kotlin/
-
-# Use your fork
-python gradleInit.py my-project \
-  --template-url https://github.com/yourcompany/gradleInit.git
-```
-
-### Adding Dependencies
-
-Edit `gradle/libs.versions.toml`:
-
-```toml
-[versions]
-custom-lib = "1.0.0"
-
-[libraries]
-custom-lib = { module = "com.example:custom-lib", version.ref = "custom-lib" }
-```
-
-Use in modules:
-
-```kotlin
-dependencies {
-    implementation(libs.custom.lib)
-}
+if [ $((NOW - LAST_CHECK)) -gt $WEEK ]; then
+    echo "Checking for updates..."
+    python gradleInit.py --check-updates --dry-run
+    echo $NOW > .last-update-check
+fi
 ```
 
 ## Best Practices
 
-1. **Use Convention Plugins**: Apply appropriate plugin to each module
-2. **Leverage Version Catalog**: Define all dependencies in `libs.versions.toml`
-3. **Maintain Test Coverage**: Use `koverVerify` to enforce thresholds
-4. **Run detekt**: Check code quality before committing
-5. **Document Public APIs**: Write KDoc for public interfaces
-6. **Update Regularly**: Use `--update-versions` for dependency updates
-7. **Test After Updates**: Always run full build and tests after version updates
+### 1. Shared Catalog Workflow
 
-## Security Considerations
+```bash
+# Central team maintains catalog
+# shared-catalog.toml on GitHub/fileserver
 
-### Self-Update
+# Projects reference it
+[dependencies.shared_catalog]
+enabled = true
+source = "https://company.com/shared-catalog.toml"
+override_local = false  # Company versions take precedence
 
-**Implemented:**
-- HTTPS for all downloads
-- Python syntax validation before installation
-- Automatic backups with timestamp
-- Rollback on failure
+# Weekly sync
+gradleInit --check-updates  # Includes shared catalog check
+```
 
-**Recommended for Production:**
-- Use `--dry-run` before applying updates
-- Pin to specific versions in CI/CD
-- Review changes on GitHub before updating
-- Consider using own fork for critical systems
+### 2. Update Policy Guidelines
 
-### Version Catalog Updates
+**Production:**
+```toml
+update_policy = "minor-only"  # Conservative
+compatibility_mode = "pinned"  # No auto-updates
+```
 
-**Workflow:**
-1. Use `--dry-run` to preview changes
-2. Review release notes for breaking changes
-3. Create feature branch
-4. Apply update
-5. Run full test suite
-6. Create pull request for review
+**Development:**
+```toml
+update_policy = "last-stable"  # Latest stable
+compatibility_mode = "last-stable"  # Auto-update
+```
+
+### 3. Breaking Change Management
+
+```bash
+# Always check updates in dry-run first
+gradleInit --check-updates --dry-run
+
+# Review breaking changes
+# If breaking: test in feature branch
+
+git checkout -b update/dependencies
+gradleInit --check-updates  # Apply
+./gradlew clean build test
+# If success: create PR
+```
 
 ## Troubleshooting
 
-### Permission Denied
+### Shared Catalog Not Loading
 
 ```bash
-chmod +x gradlew
-chmod +x gradleInit.py
+# Check URL is accessible
+curl -I https://company.com/catalog.toml
+
+# Check file exists
+ls -la ~/shared/catalog.toml
+
+# Check TOML syntax
+python -c "import toml; toml.load(open('catalog.toml'))"
 ```
 
-### Configuration Cache Warnings
+### Maven Central API Errors
 
 ```bash
-./gradlew build --no-configuration-cache
+# Check network
+curl -I https://search.maven.org
+
+# Increase timeout in code if needed
+# Or use corporate Maven mirror
 ```
 
-### Clean Everything
+### Config Validation
 
 ```bash
-./gradlew clean
-rm -rf .gradle build-logic/.gradle
-./gradlew build
+# Show current config
+gradleInit --show-config
+
+# Regenerate if corrupt
+mv .gradleInit .gradleInit.backup
+gradleInit --generate-config
 ```
 
-### Update Fails
+## Summary
 
-```bash
-# Restore from backup
-cp gradleInit.py.backup.* gradleInit.py
-cp gradle/libs.versions.toml.backup.* gradle/libs.versions.toml
-```
+gradleInit v1.1.0 provides:
 
-## Development
+- ✅ **Single File** - Easy deployment
+- ✅ **Modular** - Clean class structure
+- ✅ **Shared Catalogs** - URL or file based
+- ✅ **Smart Updates** - Maven Central + Spring Boot
+- ✅ **Persistent Config** - .gradleInit file
+- ✅ **Breaking Detection** - Semantic versioning
+- ✅ **Professional Code** - OO, testable, modern
 
-### Running Tests
-
-```bash
-chmod +x test-update-features.sh
-./test-update-features.sh
-```
-
-### Contributing
-
-1. Fork the repository
-2. Create feature branch
-3. Make changes
-4. Add tests
-5. Update documentation
-6. Submit pull request
-
-## Version History
-
-### 1.0.0 (Current)
-- Initial release
-- Convention plugins support
-- Version catalog integration
-- Git metadata integration
-- Self-update functionality
-- Version catalog update functionality
-- Comprehensive documentation
-
-## Resources
-
-- [Gradle Best Practices](https://docs.gradle.org/current/userguide/best_practices_index.html)
-- [Kotlin Documentation](https://kotlinlang.org/docs/home.html)
-- [detekt](https://detekt.dev/)
-- [Ktor](https://ktor.io/)
-- [Koin](https://insert-koin.io/)
-
-## License
-
-MIT License - see LICENSE file for details
-
-## Support
-
-- Issues: [GitHub Issues](https://github.com/stotz/gradleInit/issues)
-- Discussions: [GitHub Discussions](https://github.com/stotz/gradleInit/discussions)
-
-## Acknowledgments
-
-- Gradle team for best practices documentation
-- Kotlin community for ecosystem tools
-- Contributors to detekt, Kover, Dokka, and other tools
+**All in 1600 lines of well-organized Python!**
