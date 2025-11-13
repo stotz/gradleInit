@@ -3,17 +3,21 @@
 gradleInit - Modern Kotlin/Gradle Project Initializer
 
 A comprehensive tool for creating and managing Kotlin/Gradle multiproject builds
-with convention plugins, version catalogs, and intelligent dependency management.
+with template support from custom URLs, Jinja2 templating, Maven Central integration,
+Spring Boot BOM support, and intelligent dependency management.
 
 Features:
-- Project initialization with templates
-- Convention plugins (common, library, application, spring)
-- Version catalog management
+- Project initialization from templates (GitHub, HTTPS, file://)
+- Jinja2 template engine with custom filters
+- Shared version catalog support (URL or file-based)
+- Maven Central integration with auto-updates
 - Spring Boot BOM integration
-- Maven Central package updates
-- Shared version catalog (URL or file)
-- .gradleInit configuration persistence
+- Environment variable support with defaults
+- .gradleInit configuration (TOML-based)
+- Version pinning with semantic versioning
+- Intelligent update manager
 - Self-update capability
+- Priority: Args > ENV > .gradleInit
 
 Author: gradleInit Contributors
 License: MIT
@@ -28,19 +32,41 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Union
 from urllib import request
 from urllib.error import URLError
+from urllib.parse import urlparse
 
-try:
-    import toml
-except ImportError:
-    print("Error: 'toml' package required. Install with: pip install toml")
+# Check for required packages
+REQUIRED_PACKAGES = {
+    'jinja2': 'jinja2',
+    'toml': 'toml'
+}
+
+MISSING_PACKAGES = []
+
+for module_name, package_name in REQUIRED_PACKAGES.items():
+    try:
+        __import__(module_name)
+    except ImportError:
+        MISSING_PACKAGES.append(package_name)
+
+if MISSING_PACKAGES:
+    print(f"Missing required packages: {', '.join(MISSING_PACKAGES)}")
+    print(f"\nInstall with: pip install {' '.join(MISSING_PACKAGES)}")
+    print("\nOr using pipx for isolated installation:")
+    print(f"  pipx install --include-deps {MISSING_PACKAGES[0]}")
+    for pkg in MISSING_PACKAGES[1:]:
+        print(f"  pipx inject gradleInit {pkg}")
     sys.exit(1)
+
+import jinja2
+import toml
 
 
 # ============================================================================
@@ -48,11 +74,10 @@ except ImportError:
 # ============================================================================
 
 SCRIPT_VERSION = "1.1.0"
+DEFAULT_TEMPLATE_URL = "https://github.com/stotz/gradleInit.git"
+CONFIG_FILE_NAME = ".gradleInit"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/stotz/gradleInit/main/gradleInit.py"
-GITHUB_TEMPLATE_URL = "https://github.com/stotz/gradleInit.git"
-
 MAVEN_CENTRAL_API = "https://search.maven.org/solrsearch/select"
-MAVEN_CENTRAL_VERSIONS = "https://search.maven.org/solrsearch/select?q=g:{group}+AND+a:{artifact}&core=gav&rows=50&wt=json"
 SPRING_BOOT_BOM_URL = "https://repo.maven.apache.org/maven2/org/springframework/boot/spring-boot-dependencies/{version}/spring-boot-dependencies-{version}.pom"
 
 
@@ -78,7 +103,7 @@ def print_color(message: str, color: str = Color.END):
 
 
 def print_header(message: str):
-    """Print header."""
+    """Print header message."""
     print_color(f"\n{'=' * 70}", Color.BOLD)
     print_color(f"  {message}", Color.HEADER + Color.BOLD)
     print_color(f"{'=' * 70}\n", Color.BOLD)
@@ -105,477 +130,231 @@ def print_error(message: str):
 
 
 # ============================================================================
-# Data Classes
+# Version Handling
 # ============================================================================
 
 @dataclass
 class VersionInfo:
-    """Semantic version information."""
+    """Represents a semantic version."""
     major: int
     minor: int
     patch: int
-    qualifier: Optional[str] = None
+    prerelease: Optional[str] = None
     
-    @classmethod
-    def parse(cls, version: str) -> Optional['VersionInfo']:
-        """Parse version string to VersionInfo."""
-        pattern = r'^(\d+)\.(\d+)\.(\d+)(?:[-.](.+))?$'
-        match = re.match(pattern, version)
+    @staticmethod
+    def parse(version_str: str) -> Optional['VersionInfo']:
+        """Parse semantic version string."""
+        # Remove 'v' prefix if present
+        version_str = version_str.lstrip('v')
+        
+        # Pattern: major.minor.patch[-prerelease]
+        pattern = r'^(\d+)\.(\d+)\.(\d+)(?:-(.+))?$'
+        match = re.match(pattern, version_str)
         
         if not match:
             return None
         
-        major, minor, patch, qualifier = match.groups()
-        return cls(int(major), int(minor), int(patch), qualifier)
-    
-    def __str__(self) -> str:
-        """Convert to version string."""
-        version = f"{self.major}.{self.minor}.{self.patch}"
-        if self.qualifier:
-            version += f"-{self.qualifier}"
-        return version
+        major, minor, patch, prerelease = match.groups()
+        return VersionInfo(
+            major=int(major),
+            minor=int(minor),
+            patch=int(patch),
+            prerelease=prerelease
+        )
     
     def is_stable(self) -> bool:
-        """Check if version is stable."""
-        if not self.qualifier:
-            return True
-        unstable = ['alpha', 'beta', 'rc', 'snapshot', 'preview', 'm']
-        return not any(m in self.qualifier.lower() for m in unstable)
+        """Check if version is stable (no prerelease)."""
+        return self.prerelease is None
     
-    def compare(self, other: 'VersionInfo') -> int:
-        """Compare versions. Returns -1, 0, or 1."""
-        for s, o in [(self.major, other.major), (self.minor, other.minor), (self.patch, other.patch)]:
-            if s < o:
-                return -1
-            elif s > o:
-                return 1
+    def __str__(self) -> str:
+        """String representation."""
+        base = f"{self.major}.{self.minor}.{self.patch}"
+        return f"{base}-{self.prerelease}" if self.prerelease else base
+    
+    def __lt__(self, other: 'VersionInfo') -> bool:
+        """Compare versions."""
+        if (self.major, self.minor, self.patch) != (other.major, other.minor, other.patch):
+            return (self.major, self.minor, self.patch) < (other.major, other.minor, other.patch)
         
-        if self.qualifier is None and other.qualifier is None:
-            return 0
-        elif self.qualifier is None:
-            return 1
-        elif other.qualifier is None:
-            return -1
-        else:
-            return -1 if self.qualifier < other.qualifier else (1 if self.qualifier > other.qualifier else 0)
+        # Stable > Prerelease
+        if self.is_stable() and not other.is_stable():
+            return False
+        if not self.is_stable() and other.is_stable():
+            return True
+        
+        # Both prerelease or both stable
+        return (self.prerelease or '') < (other.prerelease or '')
 
 
 @dataclass
-class MavenArtifact:
-    """Maven artifact representation."""
-    group: str
-    artifact: str
+class VersionConstraint:
+    """Represents a version constraint with semantic versioning support."""
+    operator: str  # >=, <=, >, <, ~, *, ==
     version: str
-    timestamp: Optional[int] = None
-    
-    @property
-    def coordinate(self) -> str:
-        """Return Maven coordinate."""
-        return f"{self.group}:{self.artifact}:{self.version}"
-
-
-@dataclass
-class SharedCatalogConfig:
-    """Shared version catalog configuration."""
-    enabled: bool = False
-    source: Optional[str] = None  # URL or file path
-    sync_on_update: bool = True
-    override_local: bool = False  # If true, shared catalog overrides local versions
-
-
-@dataclass
-class MavenCentralLibrary:
-    """Maven Central library tracking."""
-    group: str
-    artifact: str
-    version: str
-    update_policy: str = "last-stable"
-    reason: Optional[str] = None
-    last_updated: Optional[str] = None
-
-
-@dataclass
-class SpringBootConfig:
-    """Spring Boot configuration."""
-    enabled: bool = False
-    version: str = "3.5.7"
-    compatibility_mode: str = "last-stable"
-    starters: List[str] = field(default_factory=list)
-    libraries: List[str] = field(default_factory=list)
-
-
-@dataclass
-class DependenciesConfig:
-    """Dependencies configuration."""
-    strategy: str = "manual"
-    shared_catalog: SharedCatalogConfig = field(default_factory=SharedCatalogConfig)
-    spring_boot: SpringBootConfig = field(default_factory=SpringBootConfig)
-    maven_central_enabled: bool = True
-    maven_central_libraries: List[MavenCentralLibrary] = field(default_factory=list)
-
-
-@dataclass
-class UpdateConfig:
-    """Update configuration."""
-    auto_check: bool = True
-    check_interval: str = "weekly"
-    last_check: Optional[str] = None
-    notify_breaking_changes: bool = True
-
-
-@dataclass
-class GradleInitConfig:
-    """Complete .gradleInit configuration."""
-    project_name: str
-    project_version: str = "0.1.0-SNAPSHOT"
-    project_group: str = "com.example"
-    gradle_version: str = "9.0"
-    kotlin_version: str = "2.2.0"
-    jvm_target: str = "21"
-    template_source: str = GITHUB_TEMPLATE_URL
-    created: str = field(default_factory=lambda: datetime.now().isoformat())
-    gradleInit_version: str = SCRIPT_VERSION
-    modules: Dict[str, Dict[str, str]] = field(default_factory=dict)
-    dependencies: DependenciesConfig = field(default_factory=DependenciesConfig)
-    update: UpdateConfig = field(default_factory=UpdateConfig)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-
-# ============================================================================
-# Utility Functions
-# ============================================================================
-
-class FileUtils:
-    """File operation utilities."""
     
     @staticmethod
-    def calculate_hash(file_path: Path) -> str:
-        """Calculate SHA256 hash of file."""
-        sha256 = hashlib.sha256()
-        with open(file_path, "rb") as f:
-            for block in iter(lambda: f.read(4096), b""):
-                sha256.update(block)
-        return sha256.hexdigest()
-    
-    @staticmethod
-    def backup_file(file_path: Path) -> Optional[Path]:
-        """Create timestamped backup of file."""
-        if not file_path.exists():
-            return None
+    def parse(constraint_str: str) -> 'VersionConstraint':
+        """Parse version constraint string."""
+        constraint_str = constraint_str.strip()
         
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = file_path.parent / f"{file_path.name}.backup.{timestamp}"
-        shutil.copy2(file_path, backup_path)
-        print_success(f"Backup created: {backup_path.name}")
-        return backup_path
-    
-    @staticmethod
-    def download_file(url: str, destination: Path, timeout: int = 30) -> bool:
-        """Download file from URL."""
-        try:
-            print_info(f"Downloading from {url}")
-            with request.urlopen(url, timeout=timeout) as response:
-                destination.write_bytes(response.read())
-            return True
-        except URLError as e:
-            print_error(f"Download failed: {e}")
-            return False
-        except Exception as e:
-            print_error(f"Unexpected error: {e}")
-            return False
-
-
-class CommandRunner:
-    """Command execution utilities."""
-    
-    @staticmethod
-    def run(command: List[str], cwd: Optional[Path] = None) -> Tuple[int, str, str]:
-        """Run command and return exit code, stdout, stderr."""
-        try:
-            result = subprocess.run(
-                command,
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                check=False
-            )
-            return result.returncode, result.stdout, result.stderr
-        except Exception as e:
-            return 1, "", str(e)
-
-
-# ============================================================================
-# Version Catalog Manager
-# ============================================================================
-
-class VersionCatalogManager:
-    """Manages version catalogs including shared catalogs."""
-    
-    def __init__(self, project_dir: Path):
-        self.project_dir = project_dir
-        self.catalog_path = project_dir / "gradle" / "libs.versions.toml"
-    
-    def load_catalog(self, path: Optional[Path] = None) -> Optional[Dict]:
-        """Load version catalog from file."""
-        catalog_path = path or self.catalog_path
+        if '*' in constraint_str:
+            return VersionConstraint('*', constraint_str.replace('*', ''))
         
-        if not catalog_path.exists():
-            return None
+        if constraint_str.startswith('~'):
+            return VersionConstraint('~', constraint_str[1:])
         
-        try:
-            return toml.load(catalog_path)
-        except Exception as e:
-            print_error(f"Failed to load catalog: {e}")
-            return None
+        operators = ['>=', '<=', '>', '<', '==']
+        for op in operators:
+            if constraint_str.startswith(op):
+                return VersionConstraint(op, constraint_str[len(op):].strip())
+        
+        return VersionConstraint('==', constraint_str)
     
-    def save_catalog(self, catalog: Dict, path: Optional[Path] = None) -> bool:
-        """Save version catalog to file."""
-        catalog_path = path or self.catalog_path
-        
+    def matches(self, version: str) -> bool:
+        """Check if version matches constraint."""
         try:
-            catalog_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(catalog_path, 'w') as f:
-                toml.dump(catalog, f)
-            return True
-        except Exception as e:
-            print_error(f"Failed to save catalog: {e}")
+            return self._compare_versions(version)
+        except Exception:
             return False
     
-    def load_shared_catalog(self, source: str) -> Optional[Dict]:
-        """Load shared version catalog from URL or file."""
-        print_info(f"Loading shared catalog from: {source}")
+    def _compare_versions(self, version: str) -> bool:
+        """Compare versions according to operator."""
+        v1_parts = self._parse_version_parts(version)
+        v2_parts = self._parse_version_parts(self.version)
         
-        # Check if URL
-        if source.startswith(('http://', 'https://')):
-            temp_file = self.project_dir / ".shared-catalog.toml.tmp"
-            
-            if FileUtils.download_file(source, temp_file):
-                catalog = self.load_catalog(temp_file)
-                temp_file.unlink()
-                return catalog
-            return None
+        if self.operator == '==':
+            return v1_parts == v2_parts
+        elif self.operator == '>=':
+            return v1_parts >= v2_parts
+        elif self.operator == '<=':
+            return v1_parts <= v2_parts
+        elif self.operator == '>':
+            return v1_parts > v2_parts
+        elif self.operator == '<':
+            return v1_parts < v2_parts
+        elif self.operator == '~':
+            return (v1_parts[:2] == v2_parts[:2] and v1_parts >= v2_parts)
+        elif self.operator == '*':
+            prefix_parts = v2_parts
+            return v1_parts[:len(prefix_parts)] == prefix_parts
         
-        # Local file path
-        source_path = Path(source).expanduser().resolve()
-        
-        if not source_path.exists():
-            print_error(f"Shared catalog not found: {source_path}")
-            return None
-        
-        return self.load_catalog(source_path)
+        return False
     
-    def merge_catalogs(
-        self,
-        local: Dict,
-        shared: Dict,
-        override_local: bool = False
-    ) -> Dict:
-        """Merge shared catalog into local catalog."""
-        merged = local.copy()
-        
-        for section in ['versions', 'libraries', 'plugins', 'bundles']:
-            if section not in shared:
-                continue
-            
-            if section not in merged:
-                merged[section] = {}
-            
-            for key, value in shared[section].items():
-                # If override_local or key doesn't exist locally
-                if override_local or key not in merged[section]:
-                    merged[section][key] = value
-        
-        return merged
-    
-    def sync_with_shared(
-        self,
-        shared_source: str,
-        override_local: bool = False,
-        dry_run: bool = False
-    ) -> Tuple[bool, List[str]]:
-        """Sync local catalog with shared catalog."""
-        print_header("Sync with Shared Catalog")
-        
-        # Load catalogs
-        local = self.load_catalog()
-        if not local:
-            print_error("Failed to load local catalog")
-            return False, []
-        
-        shared = self.load_shared_catalog(shared_source)
-        if not shared:
-            return False, []
-        
-        # Merge
-        merged = self.merge_catalogs(local, shared, override_local)
-        
-        # Detect changes
-        changes = self._detect_changes(local, merged)
-        
-        if not changes:
-            print_success("No changes needed")
-            return True, []
-        
-        # Display changes
-        print_info(f"\nFound {len(changes)} changes:")
-        for change in changes:
-            print(f"  {change}")
-        
-        # Apply if not dry run
-        if not dry_run:
-            FileUtils.backup_file(self.catalog_path)
-            self.save_catalog(merged)
-            print_success("Catalog synchronized")
-        else:
-            print_info("Dry run - no changes applied")
-        
-        return True, changes
-    
-    def _detect_changes(self, old: Dict, new: Dict) -> List[str]:
-        """Detect changes between catalogs."""
-        changes = []
-        
-        for section in ['versions', 'libraries', 'plugins']:
-            if section not in new:
-                continue
-            
-            old_section = old.get(section, {})
-            new_section = new[section]
-            
-            for key, new_value in new_section.items():
-                old_value = old_section.get(key)
-                
-                if old_value != new_value:
-                    if old_value is None:
-                        changes.append(f"[{section}] + {key}: {new_value}")
-                    else:
-                        changes.append(f"[{section}] {key}: {old_value} -> {new_value}")
-        
-        return changes
+    @staticmethod
+    def _parse_version_parts(version: str) -> Tuple[int, ...]:
+        """Parse version string into comparable tuple."""
+        parts = []
+        for part in version.split('.'):
+            match = re.match(r'^(\d+)', part)
+            if match:
+                parts.append(int(match.group(1)))
+        return tuple(parts)
 
 
 # ============================================================================
 # Maven Central Integration
 # ============================================================================
 
+@dataclass
+class MavenArtifact:
+    """Represents a Maven artifact."""
+    group: str
+    artifact: str
+    version: str
+    update_policy: str = "last-stable"
+    
+    def coordinate(self) -> str:
+        """Get Maven coordinate string."""
+        return f"{self.group}:{self.artifact}:{self.version}"
+
+
 class MavenCentralClient:
-    """Client for Maven Central API."""
+    """Client for Maven Central REST API."""
     
     @staticmethod
-    def search_versions(group: str, artifact: str) -> Optional[List[Dict]]:
-        """Search Maven Central for artifact versions."""
-        url = MAVEN_CENTRAL_VERSIONS.format(group=group, artifact=artifact)
-        
+    def search_versions(group: str, artifact: str, limit: int = 50) -> List[str]:
+        """Search for all versions of an artifact."""
         try:
-            with request.urlopen(url, timeout=30) as response:
-                data = json.loads(response.read().decode('utf-8'))
-                
-                if 'response' in data and 'docs' in data['response']:
-                    return data['response']['docs']
-                return None
+            query = f"g:{group} AND a:{artifact}"
+            url = f"{MAVEN_CENTRAL_API}?q={query}&core=gav&rows={limit}&wt=json"
+            
+            with request.urlopen(url, timeout=10) as response:
+                data = json.loads(response.read())
+                docs = data.get('response', {}).get('docs', [])
+                versions = [doc['v'] for doc in docs if 'v' in doc]
+                return versions
         except Exception as e:
-            print_error(f"Maven Central search failed: {e}")
-            return None
+            print_warning(f"Failed to search Maven Central: {e}")
+            return []
     
     @staticmethod
-    def get_latest_versions(
-        group: str,
-        artifact: str,
-        stable_only: bool = True,
-        limit: int = 10
-    ) -> List[MavenArtifact]:
-        """Get latest versions of artifact."""
-        docs = MavenCentralClient.search_versions(group, artifact)
+    def get_latest_versions(group: str, artifact: str, 
+                           stable_only: bool = True) -> List[VersionInfo]:
+        """Get latest versions sorted by semver."""
+        versions_str = MavenCentralClient.search_versions(group, artifact)
         
-        if not docs:
-            return []
+        versions = []
+        for v_str in versions_str:
+            v_info = VersionInfo.parse(v_str)
+            if v_info:
+                if not stable_only or v_info.is_stable():
+                    versions.append(v_info)
         
-        artifacts = []
+        # Sort descending
+        versions.sort(reverse=True)
+        return versions
+    
+    @staticmethod
+    def check_for_updates(artifact: MavenArtifact) -> Dict[str, Any]:
+        """Check for updates based on update policy."""
+        current_version = VersionInfo.parse(artifact.version)
+        if not current_version:
+            return {"error": "Invalid current version"}
         
-        for doc in docs:
-            version = doc.get('v')
-            if not version:
-                continue
-            
-            version_info = VersionInfo.parse(version)
-            if not version_info:
-                continue
-            
-            if stable_only and not version_info.is_stable():
-                continue
-            
-            artifacts.append(MavenArtifact(
-                group=group,
-                artifact=artifact,
-                version=version,
-                timestamp=doc.get('timestamp')
-            ))
-        
-        # Sort by version (newest first)
-        artifacts.sort(
-            key=lambda a: VersionInfo.parse(a.version),
-            reverse=True
+        all_versions = MavenCentralClient.get_latest_versions(
+            artifact.group, 
+            artifact.artifact,
+            stable_only=True
         )
         
-        return artifacts[:limit]
-    
-    @staticmethod
-    def check_for_updates(
-        current_version: str,
-        group: str,
-        artifact: str,
-        update_policy: str = "last-stable"
-    ) -> Tuple[bool, Optional[str], List[str]]:
-        """Check if updates available."""
-        current = VersionInfo.parse(current_version)
-        if not current:
-            return False, None, []
+        if not all_versions:
+            return {"error": "No versions found"}
         
-        if update_policy == "pinned":
-            return False, None, []
+        latest_stable = all_versions[0]
         
-        stable_only = update_policy in ["last-stable", "major-only", "minor-only"]
-        artifacts = MavenCentralClient.get_latest_versions(group, artifact, stable_only)
+        result = {
+            "current": str(current_version),
+            "latest_stable": str(latest_stable),
+            "has_update": latest_stable > current_version,
+            "breaking_change": False
+        }
         
-        if not artifacts:
-            return False, None, []
+        # Check for breaking changes (major version bump)
+        if latest_stable.major > current_version.major:
+            result["breaking_change"] = True
+            result["breaking_change_type"] = "major"
         
-        newer_versions = []
-        recommended = None
+        # Apply update policy
+        if artifact.update_policy == "pinned":
+            result["recommended"] = str(current_version)
+        elif artifact.update_policy == "last-stable":
+            result["recommended"] = str(latest_stable)
+        elif artifact.update_policy == "latest":
+            # Include pre-releases
+            all_with_pre = MavenCentralClient.get_latest_versions(
+                artifact.group, artifact.artifact, stable_only=False
+            )
+            result["recommended"] = str(all_with_pre[0]) if all_with_pre else str(latest_stable)
+        elif artifact.update_policy == "major-only":
+            # Find latest with same or higher major
+            candidates = [v for v in all_versions if v.major >= current_version.major]
+            result["recommended"] = str(candidates[0]) if candidates else str(current_version)
+        elif artifact.update_policy == "minor-only":
+            # Find latest with same major
+            candidates = [v for v in all_versions if v.major == current_version.major]
+            result["recommended"] = str(candidates[0]) if candidates else str(current_version)
         
-        for artifact_item in artifacts:
-            version = VersionInfo.parse(artifact_item.version)
-            if not version or version.compare(current) <= 0:
-                continue
-            
-            # Apply policy filters
-            if update_policy == "major-only" and version.major == current.major:
-                continue
-            elif update_policy == "minor-only" and version.major != current.major:
-                continue
-            
-            newer_versions.append(artifact_item.version)
-            if not recommended:
-                recommended = artifact_item.version
-        
-        return len(newer_versions) > 0, recommended, newer_versions
-    
-    @staticmethod
-    def check_breaking_changes(current: str, new: str) -> Tuple[bool, str]:
-        """Check if update contains breaking changes."""
-        curr_ver = VersionInfo.parse(current)
-        new_ver = VersionInfo.parse(new)
-        
-        if not curr_ver or not new_ver:
-            return False, "Unable to parse versions"
-        
-        if new_ver.major > curr_ver.major:
-            return True, f"Major version change: {curr_ver.major}.x -> {new_ver.major}.x"
-        
-        if curr_ver.is_stable() and not new_ver.is_stable():
-            return True, f"Downgrade to pre-release: {new_ver.qualifier}"
-        
-        return False, "No breaking changes detected"
+        return result
 
 
 # ============================================================================
@@ -583,284 +362,426 @@ class MavenCentralClient:
 # ============================================================================
 
 class SpringBootBOM:
-    """Spring Boot BOM integration."""
+    """Handle Spring Boot BOM integration."""
     
     @staticmethod
     def download_bom(version: str) -> Optional[str]:
-        """Download Spring Boot BOM POM."""
+        """Download Spring Boot BOM POM file."""
         url = SPRING_BOOT_BOM_URL.format(version=version)
         
         try:
             with request.urlopen(url, timeout=30) as response:
                 return response.read().decode('utf-8')
         except Exception as e:
-            print_error(f"Failed to download BOM: {e}")
+            print_warning(f"Failed to download Spring Boot BOM: {e}")
             return None
     
     @staticmethod
     def parse_bom(pom_content: str) -> Dict[str, str]:
-        """Parse BOM POM and extract versions."""
-        versions = {}
-        
+        """Parse BOM and extract dependency versions."""
         try:
             root = ET.fromstring(pom_content)
-            ns = {'maven': 'http://maven.apache.org/POM/4.0.0'}
+            
+            # Handle XML namespaces
+            ns = {'mvn': 'http://maven.apache.org/POM/4.0.0'}
             
             # Extract properties
-            properties = root.find('maven:properties', ns)
-            if properties is not None:
-                for prop in properties:
-                    tag = prop.tag.split('}')[-1] if '}' in prop.tag else prop.tag
-                    if tag.endswith('.version'):
-                        lib_name = tag.replace('.version', '')
-                        versions[lib_name] = prop.text
+            properties = {}
+            props_elem = root.find('mvn:properties', ns)
+            if props_elem is not None:
+                for prop in props_elem:
+                    tag = prop.tag.replace('{http://maven.apache.org/POM/4.0.0}', '')
+                    properties[tag] = prop.text
             
-            return versions
+            # Extract dependency management
+            dep_mgmt = root.find('.//mvn:dependencyManagement/mvn:dependencies', ns)
+            dependencies = {}
+            
+            if dep_mgmt is not None:
+                for dep in dep_mgmt.findall('mvn:dependency', ns):
+                    group = dep.find('mvn:groupId', ns)
+                    artifact = dep.find('mvn:artifactId', ns)
+                    version = dep.find('mvn:version', ns)
+                    
+                    if group is not None and artifact is not None and version is not None:
+                        key = f"{group.text}:{artifact.text}"
+                        version_text = version.text
+                        
+                        # Resolve properties
+                        if version_text and version_text.startswith('${') and version_text.endswith('}'):
+                            prop_name = version_text[2:-1]
+                            version_text = properties.get(prop_name, version_text)
+                        
+                        dependencies[key] = version_text
+            
+            return dependencies
         except Exception as e:
-            print_error(f"Failed to parse BOM: {e}")
+            print_warning(f"Failed to parse Spring Boot BOM: {e}")
             return {}
     
     @staticmethod
-    def sync_with_bom(
-        catalog_manager: VersionCatalogManager,
-        spring_boot_version: str,
-        libraries: Optional[List[str]] = None,
-        dry_run: bool = False
-    ) -> Tuple[bool, List[str]]:
-        """Sync version catalog with Spring Boot BOM."""
-        print_header(f"Sync with Spring Boot {spring_boot_version} BOM")
+    def sync_to_catalog(bom_version: str, catalog_path: Path) -> bool:
+        """Sync Spring Boot BOM versions to libs.versions.toml."""
+        pom_content = SpringBootBOM.download_bom(bom_version)
+        if not pom_content:
+            return False
         
-        # Download and parse BOM
-        pom = SpringBootBOM.download_bom(spring_boot_version)
-        if not pom:
-            return False, []
+        dependencies = SpringBootBOM.parse_bom(pom_content)
+        if not dependencies:
+            return False
         
-        bom_versions = SpringBootBOM.parse_bom(pom)
-        if not bom_versions:
-            return False, []
+        print_info(f"Found {len(dependencies)} managed dependencies in Spring Boot {bom_version}")
         
-        # Map to common library names
-        mapped = SpringBootBOM._map_versions(bom_versions)
-        
-        # Filter if specific libraries requested
-        if libraries:
-            mapped = {k: v for k, v in mapped.items() if k in libraries}
-        
-        # Update catalog
-        catalog = catalog_manager.load_catalog()
-        if not catalog:
-            return False, []
-        
-        changes = []
-        if 'versions' not in catalog:
-            catalog['versions'] = {}
-        
-        for key, new_version in mapped.items():
-            old_version = catalog['versions'].get(key)
-            
-            if old_version != new_version:
-                catalog['versions'][key] = new_version
-                change_msg = f"{key}: {old_version} -> {new_version}" if old_version else f"{key}: + {new_version}"
-                changes.append(change_msg)
-        
-        if not changes:
-            print_success("No updates needed")
-            return True, []
-        
-        print_info(f"\nFound {len(changes)} updates:")
-        for change in changes:
-            print(f"  {change}")
-        
-        if not dry_run:
-            FileUtils.backup_file(catalog_manager.catalog_path)
-            catalog_manager.save_catalog(catalog)
-            print_success("Catalog updated")
+        # Read existing catalog
+        if catalog_path.exists():
+            catalog = toml.load(catalog_path)
         else:
-            print_info("Dry run - no changes applied")
+            catalog = {"versions": {}, "libraries": {}}
         
-        return True, changes
-    
-    @staticmethod
-    def _map_versions(bom_versions: Dict[str, str]) -> Dict[str, str]:
-        """Map BOM versions to catalog format."""
-        mappings = {
-            'jackson': 'jackson',
-            'hibernate': 'hibernate',
-            'netty': 'netty',
-            'reactor': 'reactor',
-            'slf4j': 'slf4j',
-            'logback': 'logback',
-            'junit-jupiter': 'junit-jupiter',
-            'mockito': 'mockito',
-            'assertj': 'assertj',
-        }
+        # Add Spring Boot version
+        if "versions" not in catalog:
+            catalog["versions"] = {}
+        catalog["versions"]["spring-boot"] = bom_version
         
-        result = {}
-        for catalog_key, bom_key in mappings.items():
-            if bom_key in bom_versions:
-                result[catalog_key] = bom_versions[bom_key]
+        # Add managed dependencies
+        updated_count = 0
+        for coord, version in dependencies.items():
+            parts = coord.split(':')
+            if len(parts) == 2:
+                group, artifact = parts
+                
+                # Create library entry
+                lib_name = artifact.replace('-', '_')
+                if "libraries" not in catalog:
+                    catalog["libraries"] = {}
+                
+                catalog["libraries"][lib_name] = {
+                    "group": group,
+                    "name": artifact,
+                    "version": version
+                }
+                updated_count += 1
         
-        return result
-
-
-# ============================================================================
-# Configuration Manager
-# ============================================================================
-
-class ConfigManager:
-    """Manages .gradleInit configuration."""
-    
-    def __init__(self, project_dir: Path):
-        self.project_dir = project_dir
-        self.config_path = project_dir / ".gradleInit"
-    
-    def load(self) -> Optional[GradleInitConfig]:
-        """Load configuration from file."""
-        if not self.config_path.exists():
-            return None
-        
+        # Write catalog
         try:
-            data = toml.load(self.config_path)
-            
-            # Parse dependencies
-            deps_data = data.get('dependencies', {})
-            
-            # Shared catalog
-            shared_catalog_data = deps_data.get('shared_catalog', {})
-            shared_catalog = SharedCatalogConfig(**shared_catalog_data) if shared_catalog_data else SharedCatalogConfig()
-            
-            # Spring Boot
-            spring_boot_data = deps_data.get('spring_boot', {})
-            spring_boot = SpringBootConfig(**spring_boot_data) if spring_boot_data else SpringBootConfig()
-            
-            # Maven Central libraries
-            maven_libs = [
-                MavenCentralLibrary(**lib)
-                for lib in deps_data.get('maven_central_libraries', [])
-            ]
-            
-            dependencies = DependenciesConfig(
-                strategy=deps_data.get('strategy', 'manual'),
-                shared_catalog=shared_catalog,
-                spring_boot=spring_boot,
-                maven_central_enabled=deps_data.get('maven_central_enabled', True),
-                maven_central_libraries=maven_libs
-            )
-            
-            # Update config
-            update_data = data.get('update', {})
-            update = UpdateConfig(**update_data) if update_data else UpdateConfig()
-            
-            return GradleInitConfig(
-                project_name=data.get('project_name', ''),
-                project_version=data.get('project_version', '0.1.0-SNAPSHOT'),
-                project_group=data.get('project_group', 'com.example'),
-                gradle_version=data.get('gradle_version', '9.0'),
-                kotlin_version=data.get('kotlin_version', '2.2.0'),
-                jvm_target=data.get('jvm_target', '21'),
-                template_source=data.get('template_source', GITHUB_TEMPLATE_URL),
-                created=data.get('created', datetime.now().isoformat()),
-                gradleInit_version=data.get('gradleInit_version', SCRIPT_VERSION),
-                modules=data.get('modules', {}),
-                dependencies=dependencies,
-                update=update,
-                metadata=data.get('metadata', {})
-            )
-        except Exception as e:
-            print_error(f"Failed to load config: {e}")
-            return None
-    
-    def save(self, config: GradleInitConfig) -> bool:
-        """Save configuration to file."""
-        try:
-            # Convert to dict
-            data = {
-                'project_name': config.project_name,
-                'project_version': config.project_version,
-                'project_group': config.project_group,
-                'gradle_version': config.gradle_version,
-                'kotlin_version': config.kotlin_version,
-                'jvm_target': config.jvm_target,
-                'template_source': config.template_source,
-                'created': config.created,
-                'gradleInit_version': config.gradleInit_version,
-                'modules': config.modules,
-                'dependencies': {
-                    'strategy': config.dependencies.strategy,
-                    'shared_catalog': asdict(config.dependencies.shared_catalog),
-                    'spring_boot': asdict(config.dependencies.spring_boot),
-                    'maven_central_enabled': config.dependencies.maven_central_enabled,
-                    'maven_central_libraries': [
-                        asdict(lib) for lib in config.dependencies.maven_central_libraries
-                    ]
-                },
-                'update': asdict(config.update),
-                'metadata': config.metadata
-            }
-            
-            # Write header
-            with open(self.config_path, 'w') as f:
-                f.write(f"# .gradleInit configuration\n")
-                f.write(f"# Generated by gradleInit v{SCRIPT_VERSION}\n")
-                f.write(f"# Created: {config.created}\n\n")
-                toml.dump(data, f)
-            
-            print_success(f"Configuration saved: {self.config_path}")
+            with open(catalog_path, 'w') as f:
+                toml.dump(catalog, f)
+            print_success(f"Synced {updated_count} dependencies to {catalog_path}")
             return True
         except Exception as e:
-            print_error(f"Failed to save config: {e}")
+            print_error(f"Failed to write catalog: {e}")
             return False
+
+
+# ============================================================================
+# Configuration Management
+# ============================================================================
+
+@dataclass
+class SharedCatalogConfig:
+    """Configuration for shared version catalog."""
+    enabled: bool = False
+    source: Optional[str] = None  # URL or file path
+    sync_on_update: bool = True
+    override_local: bool = False
+
+
+@dataclass
+class MavenCentralLibrary:
+    """Configuration for a Maven Central tracked library."""
+    group: str
+    artifact: str
+    version: str
+    update_policy: str = "last-stable"
+
+
+@dataclass
+class GradleInitConfig:
+    """Configuration for gradleInit with all features."""
     
-    def generate_from_project(self) -> Optional[GradleInitConfig]:
-        """Generate config from existing project."""
-        print_info("Analyzing project...")
+    # Template settings
+    template_url: Optional[str] = None
+    template_version: Optional[str] = None
+    
+    # Project defaults
+    default_group: Optional[str] = None
+    default_version: str = "0.1.0"
+    
+    # Build tool versions
+    gradle_version: Optional[str] = None
+    kotlin_version: Optional[str] = None
+    jdk_version: Optional[str] = None
+    
+    # Version constraints
+    version_constraints: Dict[str, str] = field(default_factory=dict)
+    
+    # Shared catalog
+    shared_catalog: SharedCatalogConfig = field(default_factory=SharedCatalogConfig)
+    
+    # Maven Central tracking
+    maven_central_libraries: List[MavenCentralLibrary] = field(default_factory=list)
+    
+    # Spring Boot
+    spring_boot_enabled: bool = False
+    spring_boot_version: Optional[str] = None
+    spring_boot_compatibility: str = "last-stable"  # pinned, last-stable, latest
+    
+    # Update settings
+    auto_check_updates: bool = False
+    auto_check_interval: str = "weekly"  # daily, weekly, monthly
+    last_update_check: Optional[str] = None
+    
+    # Custom values
+    custom_values: Dict[str, Any] = field(default_factory=dict)
+    
+    @staticmethod
+    def load_from_file(config_path: Path) -> Optional['GradleInitConfig']:
+        """Load configuration from .gradleInit file."""
+        if not config_path.exists():
+            return None
         
-        # Read settings.gradle.kts
-        settings_file = self.project_dir / "settings.gradle.kts"
-        project_name = self.project_dir.name
-        
-        if settings_file.exists():
-            content = settings_file.read_text()
-            match = re.search(r'rootProject\.name\s*=\s*"([^"]+)"', content)
-            if match:
-                project_name = match.group(1)
-        
-        # Read gradle.properties
-        props_file = self.project_dir / "gradle.properties"
-        version = "0.1.0-SNAPSHOT"
-        group = "com.example"
-        
-        if props_file.exists():
-            for line in props_file.read_text().splitlines():
-                if line.startswith('version='):
-                    version = line.split('=', 1)[1].strip()
-                elif line.startswith('group='):
-                    group = line.split('=', 1)[1].strip()
-        
-        # Detect modules
-        modules = {}
-        for item in self.project_dir.iterdir():
-            if item.is_dir() and (item / "build.gradle.kts").exists():
-                build_file = item / "build.gradle.kts"
-                content = build_file.read_text()
-                
-                is_app = 'application' in content or 'mainClass' in content
-                module_type = "application" if is_app else "library"
-                
-                modules[item.name] = {
-                    'type': module_type,
-                    'convention_plugin': f"kotlin-{module_type}-conventions"
+        try:
+            data = toml.load(config_path)
+            
+            # Parse shared catalog
+            shared_cat_data = data.get('dependencies', {}).get('shared_catalog', {})
+            shared_catalog = SharedCatalogConfig(
+                enabled=shared_cat_data.get('enabled', False),
+                source=shared_cat_data.get('source'),
+                sync_on_update=shared_cat_data.get('sync_on_update', True),
+                override_local=shared_cat_data.get('override_local', False)
+            )
+            
+            # Parse Maven Central libraries
+            maven_libs = []
+            for lib_data in data.get('dependencies', {}).get('maven_central', {}).get('libraries', []):
+                maven_libs.append(MavenCentralLibrary(
+                    group=lib_data['group'],
+                    artifact=lib_data['artifact'],
+                    version=lib_data['version'],
+                    update_policy=lib_data.get('update_policy', 'last-stable')
+                ))
+            
+            # Parse Spring Boot
+            spring_data = data.get('dependencies', {}).get('spring_boot', {})
+            
+            return GradleInitConfig(
+                template_url=data.get('template', {}).get('url'),
+                template_version=data.get('template', {}).get('version'),
+                default_group=data.get('defaults', {}).get('group'),
+                default_version=data.get('defaults', {}).get('version', '0.1.0'),
+                gradle_version=data.get('versions', {}).get('gradle'),
+                kotlin_version=data.get('versions', {}).get('kotlin'),
+                jdk_version=data.get('versions', {}).get('jdk'),
+                version_constraints=data.get('constraints', {}),
+                shared_catalog=shared_catalog,
+                maven_central_libraries=maven_libs,
+                spring_boot_enabled=spring_data.get('enabled', False),
+                spring_boot_version=spring_data.get('version'),
+                spring_boot_compatibility=spring_data.get('compatibility_mode', 'last-stable'),
+                auto_check_updates=data.get('updates', {}).get('auto_check', False),
+                auto_check_interval=data.get('updates', {}).get('check_interval', 'weekly'),
+                last_update_check=data.get('updates', {}).get('last_check'),
+                custom_values=data.get('custom', {})
+            )
+        except Exception as e:
+            print_warning(f"Failed to load config from {config_path}: {e}")
+            return None
+    
+    def save_to_file(self, config_path: Path):
+        """Save configuration to .gradleInit file."""
+        data = {
+            'template': {
+                'url': self.template_url,
+                'version': self.template_version
+            },
+            'defaults': {
+                'group': self.default_group,
+                'version': self.default_version
+            },
+            'versions': {
+                'gradle': self.gradle_version,
+                'kotlin': self.kotlin_version,
+                'jdk': self.jdk_version
+            },
+            'constraints': self.version_constraints,
+            'dependencies': {
+                'shared_catalog': {
+                    'enabled': self.shared_catalog.enabled,
+                    'source': self.shared_catalog.source,
+                    'sync_on_update': self.shared_catalog.sync_on_update,
+                    'override_local': self.shared_catalog.override_local
+                },
+                'maven_central': {
+                    'libraries': [
+                        {
+                            'group': lib.group,
+                            'artifact': lib.artifact,
+                            'version': lib.version,
+                            'update_policy': lib.update_policy
+                        }
+                        for lib in self.maven_central_libraries
+                    ]
+                },
+                'spring_boot': {
+                    'enabled': self.spring_boot_enabled,
+                    'version': self.spring_boot_version,
+                    'compatibility_mode': self.spring_boot_compatibility
                 }
+            },
+            'updates': {
+                'auto_check': self.auto_check_updates,
+                'check_interval': self.auto_check_interval,
+                'last_check': self.last_update_check
+            },
+            'custom': self.custom_values
+        }
         
-        config = GradleInitConfig(
-            project_name=project_name,
-            project_version=version,
-            project_group=group,
-            modules=modules
+        # Remove None values
+        data = self._remove_none_recursive(data)
+        
+        try:
+            with open(config_path, 'w') as f:
+                toml.dump(data, f)
+            print_success(f"Configuration saved to {config_path}")
+        except Exception as e:
+            print_error(f"Failed to save config: {e}")
+    
+    @staticmethod
+    def _remove_none_recursive(data: Any) -> Any:
+        """Recursively remove None values from dict."""
+        if isinstance(data, dict):
+            return {k: GradleInitConfig._remove_none_recursive(v) 
+                   for k, v in data.items() if v is not None}
+        elif isinstance(data, list):
+            return [GradleInitConfig._remove_none_recursive(item) for item in data]
+        return data
+    
+    def check_version_constraint(self, name: str, version: str) -> bool:
+        """Check if version satisfies constraint."""
+        if name not in self.version_constraints:
+            return True
+        
+        constraint = VersionConstraint.parse(self.version_constraints[name])
+        return constraint.matches(version)
+    
+    def merge_with_env_and_args(self, env_vars: Dict[str, str], 
+                                cli_args: Dict[str, Any]) -> 'GradleInitConfig':
+        """Merge config with ENV and CLI args (priority: CLI > ENV > config)."""
+        merged = GradleInitConfig(
+            template_url=cli_args.get('template_url') or 
+                        env_vars.get('GRADLE_INIT_TEMPLATE') or 
+                        self.template_url,
+            template_version=cli_args.get('template_version') or 
+                           env_vars.get('GRADLE_INIT_TEMPLATE_VERSION') or 
+                           self.template_version,
+            default_group=cli_args.get('group') or 
+                         env_vars.get('GRADLE_INIT_GROUP') or 
+                         self.default_group,
+            default_version=cli_args.get('version') or 
+                           env_vars.get('GRADLE_INIT_VERSION') or 
+                           self.default_version,
+            gradle_version=cli_args.get('gradle_version') or 
+                          env_vars.get('GRADLE_VERSION') or 
+                          self.gradle_version,
+            kotlin_version=cli_args.get('kotlin_version') or 
+                          env_vars.get('KOTLIN_VERSION') or 
+                          self.kotlin_version,
+            jdk_version=cli_args.get('jdk_version') or 
+                       env_vars.get('JDK_VERSION') or 
+                       self.jdk_version,
+            version_constraints=self.version_constraints.copy(),
+            shared_catalog=self.shared_catalog,
+            maven_central_libraries=self.maven_central_libraries.copy(),
+            spring_boot_enabled=self.spring_boot_enabled,
+            spring_boot_version=self.spring_boot_version,
+            spring_boot_compatibility=self.spring_boot_compatibility,
+            auto_check_updates=self.auto_check_updates,
+            auto_check_interval=self.auto_check_interval,
+            last_update_check=self.last_update_check,
+            custom_values=self.custom_values.copy()
         )
         
-        print_success(f"Generated config for project: {project_name}")
-        return config
+        return merged
+
+
+# ============================================================================
+# Shared Catalog Manager
+# ============================================================================
+
+class SharedCatalogManager:
+    """Manage shared version catalogs from URL or file."""
+    
+    @staticmethod
+    def fetch_catalog(source: str) -> Optional[Dict[str, Any]]:
+        """Fetch catalog from URL or file."""
+        parsed = urlparse(source)
+        
+        try:
+            if parsed.scheme in ('http', 'https'):
+                # Download from URL
+                with request.urlopen(source, timeout=10) as response:
+                    content = response.read().decode('utf-8')
+                    return toml.loads(content)
+            elif parsed.scheme == 'file' or parsed.scheme == '':
+                # Load from file
+                path = Path(parsed.path if parsed.scheme == 'file' else source)
+                if path.exists():
+                    return toml.load(path)
+                else:
+                    print_error(f"Catalog file not found: {path}")
+                    return None
+            else:
+                print_error(f"Unsupported catalog source scheme: {parsed.scheme}")
+                return None
+        except Exception as e:
+            print_error(f"Failed to fetch catalog from {source}: {e}")
+            return None
+    
+    @staticmethod
+    def merge_catalogs(local: Dict[str, Any], shared: Dict[str, Any],
+                      override_local: bool = False) -> Dict[str, Any]:
+        """Merge shared catalog into local catalog."""
+        if override_local:
+            # Shared wins
+            merged = {**local, **shared}
+        else:
+            # Local wins
+            merged = {**shared, **local}
+        
+        return merged
+    
+    @staticmethod
+    def sync_catalog(config: GradleInitConfig, catalog_path: Path) -> bool:
+        """Sync shared catalog to local project."""
+        if not config.shared_catalog.enabled or not config.shared_catalog.source:
+            return True
+        
+        print_info(f"Syncing shared catalog from {config.shared_catalog.source}")
+        
+        shared = SharedCatalogManager.fetch_catalog(config.shared_catalog.source)
+        if not shared:
+            return False
+        
+        # Load local catalog
+        local = {}
+        if catalog_path.exists():
+            local = toml.load(catalog_path)
+        
+        # Merge
+        merged = SharedCatalogManager.merge_catalogs(
+            local, shared, config.shared_catalog.override_local
+        )
+        
+        # Save
+        try:
+            with open(catalog_path, 'w') as f:
+                toml.dump(merged, f)
+            print_success(f"Shared catalog synced to {catalog_path}")
+            return True
+        except Exception as e:
+            print_error(f"Failed to sync catalog: {e}")
+            return False
 
 
 # ============================================================================
@@ -868,418 +789,688 @@ class ConfigManager:
 # ============================================================================
 
 class UpdateManager:
-    """Manages dependency updates."""
+    """Coordinate updates from all sources."""
     
-    def __init__(self, project_dir: Path, config: GradleInitConfig):
-        self.project_dir = project_dir
-        self.config = config
-        self.catalog_manager = VersionCatalogManager(project_dir)
-    
-    def check_all_updates(self, dry_run: bool = False) -> Dict[str, Any]:
-        """Check all configured updates."""
-        print_header("Checking for Updates")
+    @staticmethod
+    def should_check_updates(config: GradleInitConfig) -> bool:
+        """Check if it's time to check for updates."""
+        if not config.auto_check_updates:
+            return False
         
-        results = {
-            'spring_boot': None,
+        if not config.last_update_check:
+            return True
+        
+        try:
+            last_check = datetime.fromisoformat(config.last_update_check)
+            now = datetime.now()
+            
+            if config.auto_check_interval == "daily":
+                return (now - last_check) > timedelta(days=1)
+            elif config.auto_check_interval == "weekly":
+                return (now - last_check) > timedelta(weeks=1)
+            elif config.auto_check_interval == "monthly":
+                return (now - last_check) > timedelta(days=30)
+        except Exception:
+            return True
+        
+        return False
+    
+    @staticmethod
+    def check_all_updates(config: GradleInitConfig) -> Dict[str, Any]:
+        """Check for updates from all sources."""
+        report = {
+            'timestamp': datetime.now().isoformat(),
+            'shared_catalog': None,
             'maven_central': [],
-            'shared_catalog': None
+            'spring_boot': None
         }
-        
-        # Check Spring Boot
-        if self.config.dependencies.spring_boot.enabled:
-            results['spring_boot'] = self._check_spring_boot_updates()
-        
-        # Check Maven Central libraries
-        for lib in self.config.dependencies.maven_central_libraries:
-            result = self._check_library_updates(lib)
-            if result:
-                results['maven_central'].append(result)
         
         # Check shared catalog
-        if self.config.dependencies.shared_catalog.enabled:
-            results['shared_catalog'] = self._check_shared_catalog_updates(dry_run)
+        if config.shared_catalog.enabled and config.shared_catalog.source:
+            catalog = SharedCatalogManager.fetch_catalog(config.shared_catalog.source)
+            if catalog:
+                report['shared_catalog'] = {
+                    'available': True,
+                    'source': config.shared_catalog.source
+                }
         
-        # Generate report
-        self._generate_report(results)
+        # Check Maven Central libraries
+        for lib in config.maven_central_libraries:
+            artifact = MavenArtifact(
+                group=lib.group,
+                artifact=lib.artifact,
+                version=lib.version,
+                update_policy=lib.update_policy
+            )
+            
+            update_info = MavenCentralClient.check_for_updates(artifact)
+            if 'error' not in update_info:
+                report['maven_central'].append({
+                    'artifact': artifact.coordinate(),
+                    'update_info': update_info
+                })
         
-        return results
+        # Check Spring Boot
+        if config.spring_boot_enabled:
+            # Could check for newer Spring Boot versions here
+            report['spring_boot'] = {
+                'current': config.spring_boot_version,
+                'mode': config.spring_boot_compatibility
+            }
+        
+        return report
     
-    def _check_spring_boot_updates(self) -> Optional[Dict]:
-        """Check Spring Boot updates."""
-        current = self.config.dependencies.spring_boot.version
-        mode = self.config.dependencies.spring_boot.compatibility_mode
-        
-        if mode == "pinned":
-            return None
-        
-        print_info(f"Checking Spring Boot updates (current: {current})...")
-        
-        # For now, return placeholder
-        # In real implementation, would check Maven Central
-        return {
-            'current': current,
-            'recommended': current,
-            'available': []
-        }
-    
-    def _check_library_updates(self, lib: MavenCentralLibrary) -> Optional[Dict]:
-        """Check library updates."""
-        has_update, recommended, newer = MavenCentralClient.check_for_updates(
-            lib.version,
-            lib.group,
-            lib.artifact,
-            lib.update_policy
-        )
-        
-        if not has_update:
-            return None
-        
-        is_breaking, reason = MavenCentralClient.check_breaking_changes(
-            lib.version,
-            recommended
-        )
-        
-        return {
-            'library': f"{lib.group}:{lib.artifact}",
-            'current': lib.version,
-            'recommended': recommended,
-            'policy': lib.update_policy,
-            'breaking': is_breaking,
-            'breaking_reason': reason if is_breaking else None,
-            'newer_versions': newer[:3]
-        }
-    
-    def _check_shared_catalog_updates(self, dry_run: bool) -> Optional[Dict]:
-        """Check shared catalog updates."""
-        source = self.config.dependencies.shared_catalog.source
-        
-        if not source:
-            return None
-        
-        success, changes = self.catalog_manager.sync_with_shared(
-            source,
-            self.config.dependencies.shared_catalog.override_local,
-            dry_run=True  # Always dry run for check
-        )
-        
-        return {
-            'source': source,
-            'changes': changes,
-            'success': success
-        }
-    
-    def _generate_report(self, results: Dict[str, Any]):
-        """Generate and print update report."""
+    @staticmethod
+    def print_update_report(report: Dict[str, Any]):
+        """Print formatted update report."""
         print_header("Update Report")
         
-        total_updates = 0
-        breaking_changes = 0
-        
-        # Maven Central updates
-        if results['maven_central']:
-            print_info("\nMaven Central Libraries:")
-            for update in results['maven_central']:
-                total_updates += 1
-                if update['breaking']:
-                    breaking_changes += 1
-                
-                print(f"\n  {update['library']}")
-                print(f"    Current:     {update['current']}")
-                print(f"    Recommended: {update['recommended']}")
-                print(f"    Policy:      {update['policy']}")
-                
-                if update['breaking']:
-                    print_warning(f"    Breaking:    {update['breaking_reason']}")
+        print_info(f"Generated: {report['timestamp']}")
         
         # Shared catalog
-        if results['shared_catalog'] and results['shared_catalog']['changes']:
-            print_info(f"\nShared Catalog ({results['shared_catalog']['source']}):")
-            for change in results['shared_catalog']['changes'][:5]:
-                print(f"    {change}")
+        if report['shared_catalog']:
+            print_info("\nShared Catalog:")
+            print_success(f"  Available from: {report['shared_catalog']['source']}")
         
-        # Summary
-        print_header("Summary")
-        print(f"  Total updates available: {total_updates}")
-        if breaking_changes > 0:
-            print_warning(f"  Breaking changes: {breaking_changes}")
+        # Maven Central
+        if report['maven_central']:
+            print_info("\nMaven Central Updates:")
+            for item in report['maven_central']:
+                artifact = item['artifact']
+                info = item['update_info']
+                
+                if info.get('has_update'):
+                    current = info['current']
+                    recommended = info.get('recommended', info['latest_stable'])
+                    
+                    msg = f"  {artifact}: {current} ? {recommended}"
+                    if info.get('breaking_change'):
+                        print_warning(msg + " [BREAKING]")
+                    else:
+                        print_success(msg)
+                else:
+                    print_info(f"  {artifact}: Up to date")
         
-        if total_updates == 0:
-            print_success("  All dependencies are up to date!")
+        # Spring Boot
+        if report['spring_boot']:
+            print_info("\nSpring Boot:")
+            print_info(f"  Version: {report['spring_boot']['current']}")
+            print_info(f"  Mode: {report['spring_boot']['mode']}")
 
 
 # ============================================================================
-# Self-Update
+# Template Engine
+# ============================================================================
+
+class TemplateEngine:
+    """Jinja2-based template engine with custom filters."""
+    
+    def __init__(self, template_dir: Path, config: GradleInitConfig, 
+                 context: Dict[str, Any]):
+        """Initialize template engine."""
+        self.template_dir = template_dir
+        self.config = config
+        self.context = context
+        
+        self.env = jinja2.Environment(
+            loader=jinja2.FileSystemLoader(str(template_dir)),
+            autoescape=jinja2.select_autoescape(['html', 'xml']),
+            trim_blocks=True,
+            lstrip_blocks=True
+        )
+        
+        # Add custom filters
+        self.env.filters['camelCase'] = self._camel_case
+        self.env.filters['pascalCase'] = self._pascal_case
+        self.env.filters['snakeCase'] = self._snake_case
+        self.env.filters['kebabCase'] = self._kebab_case
+        
+        # Add custom globals
+        self.env.globals['env'] = self._get_env_var
+        self.env.globals['config'] = self._get_config_value
+    
+    @staticmethod
+    def _camel_case(text: str) -> str:
+        """Convert to camelCase."""
+        parts = re.split(r'[-_\s]+', text)
+        return parts[0].lower() + ''.join(p.capitalize() for p in parts[1:])
+    
+    @staticmethod
+    def _pascal_case(text: str) -> str:
+        """Convert to PascalCase."""
+        parts = re.split(r'[-_\s]+', text)
+        return ''.join(p.capitalize() for p in parts)
+    
+    @staticmethod
+    def _snake_case(text: str) -> str:
+        """Convert to snake_case."""
+        return re.sub(r'[-\s]+', '_', text.lower())
+    
+    @staticmethod
+    def _kebab_case(text: str) -> str:
+        """Convert to kebab-case."""
+        return re.sub(r'[_\s]+', '-', text.lower())
+    
+    def _get_env_var(self, var_name: str, default: str = '') -> str:
+        """Get environment variable with default."""
+        return os.environ.get(var_name, default)
+    
+    def _get_config_value(self, key: str, default: Any = None) -> Any:
+        """Get value from config."""
+        keys = key.split('.')
+        value = self.config.custom_values
+        
+        for k in keys:
+            if isinstance(value, dict):
+                value = value.get(k)
+            else:
+                return default
+        
+        return value if value is not None else default
+    
+    def render_template(self, template_path: Path) -> str:
+        """Render a template file."""
+        try:
+            relative_path = template_path.relative_to(self.template_dir)
+            template = self.env.get_template(str(relative_path))
+            return template.render(**self.context)
+        except jinja2.TemplateError as e:
+            print_error(f"Template error in {template_path}: {e}")
+            raise
+    
+    def process_directory(self, source_dir: Path, target_dir: Path):
+        """Process all templates in directory."""
+        for item in source_dir.rglob('*'):
+            if item.is_file():
+                if '.git' in item.parts:
+                    continue
+                
+                relative = item.relative_to(source_dir)
+                target_path = target_dir / relative
+                
+                is_template = item.suffix == '.j2'
+                
+                if not is_template:
+                    try:
+                        content = item.read_text(encoding='utf-8')
+                        is_template = '{{' in content or '{%' in content
+                    except Exception:
+                        is_template = False
+                
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                if is_template:
+                    if item.suffix == '.j2':
+                        target_path = target_path.with_suffix('')
+                    
+                    rendered = self.render_template(item)
+                    target_path.write_text(rendered, encoding='utf-8')
+                    print_info(f"  Template: {relative}")
+                else:
+                    shutil.copy2(item, target_path)
+                    print_info(f"  Copy: {relative}")
+
+
+# ============================================================================
+# Template Source Handler
+# ============================================================================
+
+class TemplateSource:
+    """Handle different template sources."""
+    
+    @staticmethod
+    def fetch_template(template_url: str, version: Optional[str] = None) -> Path:
+        """Fetch template from URL."""
+        parsed = urlparse(template_url)
+        
+        if parsed.scheme in ('http', 'https'):
+            if template_url.endswith('.git') or 'github.com' in template_url:
+                return TemplateSource._fetch_git_repo(template_url, version)
+            else:
+                return TemplateSource._fetch_https_archive(template_url)
+        elif parsed.scheme == 'file':
+            return Path(parsed.path)
+        elif parsed.scheme == '':
+            path = Path(template_url)
+            if not path.exists():
+                raise ValueError(f"Template path does not exist: {template_url}")
+            return path
+        else:
+            raise ValueError(f"Unsupported URL scheme: {parsed.scheme}")
+    
+    @staticmethod
+    def _fetch_git_repo(repo_url: str, version: Optional[str] = None) -> Path:
+        """Clone git repository."""
+        print_info(f"Cloning template from {repo_url}")
+        
+        temp_dir = Path(tempfile.mkdtemp(prefix='gradleinit_'))
+        
+        try:
+            cmd = ['git', 'clone', '--depth', '1']
+            if version:
+                cmd.extend(['--branch', version])
+            cmd.extend([repo_url, str(temp_dir)])
+            
+            subprocess.run(cmd, check=True, capture_output=True)
+            print_success("Template cloned successfully")
+            
+            git_dir = temp_dir / '.git'
+            if git_dir.exists():
+                shutil.rmtree(git_dir)
+            
+            return temp_dir
+        except subprocess.CalledProcessError as e:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise RuntimeError(f"Failed to clone repository: {e.stderr.decode()}")
+    
+    @staticmethod
+    def _fetch_https_archive(archive_url: str) -> Path:
+        """Download and extract archive."""
+        print_info(f"Downloading template from {archive_url}")
+        
+        temp_dir = Path(tempfile.mkdtemp(prefix='gradleinit_'))
+        archive_path = temp_dir / 'template.zip'
+        
+        try:
+            with request.urlopen(archive_url) as response:
+                archive_path.write_bytes(response.read())
+            
+            print_success("Template downloaded")
+            
+            extract_dir = temp_dir / 'extracted'
+            shutil.unpack_archive(archive_path, extract_dir)
+            
+            contents = list(extract_dir.iterdir())
+            if len(contents) == 1 and contents[0].is_dir():
+                template_root = contents[0]
+            else:
+                template_root = extract_dir
+            
+            return template_root
+            
+        except Exception as e:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise RuntimeError(f"Failed to download template: {e}")
+
+
+# ============================================================================
+# Self-Updater
 # ============================================================================
 
 class SelfUpdater:
-    """Handles script self-updates."""
+    """Handle script self-updates."""
     
     @staticmethod
-    def update(dry_run: bool = False, force: bool = False) -> bool:
-        """Update script from GitHub."""
-        print_header("Self Update")
-        
-        script_path = Path(__file__).resolve()
-        temp_script = script_path.parent / f".{script_path.name}.tmp"
-        
+    def check_for_update() -> Optional[str]:
+        """Check if newer version is available."""
         try:
-            if not FileUtils.download_file(GITHUB_RAW_URL, temp_script):
-                return False
+            with request.urlopen(GITHUB_RAW_URL, timeout=5) as response:
+                content = response.read().decode('utf-8')
+                
+                # Extract version from script
+                match = re.search(r'SCRIPT_VERSION\s*=\s*"([^"]+)"', content)
+                if match:
+                    remote_version = match.group(1)
+                    if remote_version != SCRIPT_VERSION:
+                        return remote_version
+        except Exception:
+            pass
+        
+        return None
+    
+    @staticmethod
+    def perform_update(script_path: Path) -> bool:
+        """Download and replace script."""
+        try:
+            print_info("Downloading latest version...")
             
-            # Extract version
-            content = temp_script.read_text()
-            version_match = re.search(r'SCRIPT_VERSION\s*=\s*["\']([^"\']+)["\']', content)
-            remote_version = version_match.group(1) if version_match else "unknown"
+            with request.urlopen(GITHUB_RAW_URL, timeout=10) as response:
+                new_content = response.read()
             
-            print_info(f"Current version: {SCRIPT_VERSION}")
-            print_info(f"Remote version: {remote_version}")
+            # Backup current version
+            backup_path = script_path.with_suffix('.py.bak')
+            shutil.copy2(script_path, backup_path)
             
-            if not force and remote_version == SCRIPT_VERSION:
-                print_success("Already up to date!")
-                temp_script.unlink()
-                return True
+            # Write new version
+            script_path.write_bytes(new_content)
+            script_path.chmod(0o755)
             
-            if dry_run:
-                print_info(f"Would update from {SCRIPT_VERSION} to {remote_version}")
-                temp_script.unlink()
-                return True
-            
-            # Validate Python syntax
-            try:
-                compile(content, str(temp_script), 'exec')
-            except SyntaxError as e:
-                print_error(f"Downloaded script has syntax errors: {e}")
-                temp_script.unlink()
-                return False
-            
-            # Backup and replace
-            backup = FileUtils.backup_file(script_path)
-            shutil.copy2(temp_script, script_path)
-            temp_script.unlink()
-            
-            if os.name != 'nt':
-                os.chmod(script_path, 0o755)
-            
-            print_success(f"Updated from {SCRIPT_VERSION} to {remote_version}")
-            if backup:
-                print_info(f"Backup: {backup}")
-            print_info("Restart script to use new version")
-            
+            print_success("Update successful!")
+            print_info(f"Backup saved to: {backup_path}")
             return True
+            
         except Exception as e:
-            print_error(f"Self-update failed: {e}")
-            if temp_script.exists():
-                temp_script.unlink()
+            print_error(f"Update failed: {e}")
             return False
 
 
 # ============================================================================
-# Project Creator (Simplified for now)
+# Project Initializer
 # ============================================================================
 
-class ProjectCreator:
-    """Creates new Gradle projects."""
+class GradleInitializer:
+    """Main class for initializing Gradle projects."""
     
-    @staticmethod
-    def create_simple_project(
-        project_name: str,
-        group: str,
-        version: str,
-        save_config: bool = False
-    ) -> bool:
-        """Create a simple project structure."""
-        print_header(f"Creating Project: {project_name}")
+    def __init__(self, config: GradleInitConfig):
+        """Initialize with configuration."""
+        self.config = config
+    
+    def init_project(self, project_name: str, target_dir: Path,
+                    template_url: Optional[str] = None,
+                    additional_context: Optional[Dict[str, Any]] = None):
+        """Initialize a new Gradle project."""
         
-        project_dir = Path.cwd() / project_name
+        print_header(f"Initializing Project: {project_name}")
         
-        if project_dir.exists():
-            print_error(f"Directory already exists: {project_name}")
-            return False
+        template_url = template_url or self.config.template_url or DEFAULT_TEMPLATE_URL
         
         try:
-            project_dir.mkdir()
+            template_dir = TemplateSource.fetch_template(
+                template_url, 
+                self.config.template_version
+            )
+        except Exception as e:
+            print_error(f"Failed to fetch template: {e}")
+            return False
+        
+        context = self._prepare_context(project_name, additional_context)
+        
+        if not self._validate_version_constraints(context):
+            return False
+        
+        target_dir.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            engine = TemplateEngine(template_dir, self.config, context)
+            print_info("Processing templates...")
+            engine.process_directory(template_dir, target_dir)
+            print_success(f"Project created in {target_dir}")
             
-            # Create basic structure
-            (project_dir / "gradle").mkdir()
+            # Sync shared catalog if enabled
+            if self.config.shared_catalog.enabled:
+                catalog_path = target_dir / 'gradle' / 'libs.versions.toml'
+                SharedCatalogManager.sync_catalog(self.config, catalog_path)
             
-            # Create settings.gradle.kts
-            settings_content = f'rootProject.name = "{project_name}"\n'
-            (project_dir / "settings.gradle.kts").write_text(settings_content)
+            # Sync Spring Boot BOM if enabled
+            if self.config.spring_boot_enabled and self.config.spring_boot_version:
+                catalog_path = target_dir / 'gradle' / 'libs.versions.toml'
+                SpringBootBOM.sync_to_catalog(self.config.spring_boot_version, catalog_path)
             
-            # Create gradle.properties
-            props_content = f"""version={version}
-group={group}
-
-org.gradle.jvmargs=-Xmx2048m
-org.gradle.parallel=true
-org.gradle.caching=true
-"""
-            (project_dir / "gradle.properties").write_text(props_content)
+            self._init_git_repo(target_dir)
             
-            print_success(f"Project created: {project_name}")
+            print_header("Project initialization complete!")
+            print_success(f"Project: {project_name}")
+            print_success(f"Location: {target_dir}")
             
-            # Save config if requested
-            if save_config:
-                config = GradleInitConfig(
-                    project_name=project_name,
-                    project_version=version,
-                    project_group=group
-                )
-                ConfigManager(project_dir).save(config)
+            print_info("\nNext steps:")
+            print_info("  cd " + str(target_dir))
+            print_info("  ./gradlew build")
             
             return True
+            
         except Exception as e:
-            print_error(f"Failed to create project: {e}")
+            print_error(f"Failed to process templates: {e}")
             return False
+        finally:
+            if template_url.startswith(('http://', 'https://')):
+                shutil.rmtree(template_dir, ignore_errors=True)
+    
+    def _prepare_context(self, project_name: str, 
+                        additional: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Prepare template context."""
+        context = {
+            'project_name': project_name,
+            'project_group': self.config.default_group or f'com.example.{project_name}',
+            'project_version': self.config.default_version,
+            'gradle_version': self.config.gradle_version or '9.0',
+            'kotlin_version': self.config.kotlin_version or '2.2.0',
+            'jdk_version': self.config.jdk_version or '21',
+            'timestamp': datetime.now().isoformat(),
+        }
+        
+        context.update(self.config.custom_values)
+        
+        if additional:
+            context.update(additional)
+        
+        return context
+    
+    def _validate_version_constraints(self, context: Dict[str, Any]) -> bool:
+        """Validate versions meet constraints."""
+        checks = [
+            ('gradle_version', context.get('gradle_version')),
+            ('kotlin_version', context.get('kotlin_version')),
+            ('jdk_version', context.get('jdk_version'))
+        ]
+        
+        all_valid = True
+        for name, version in checks:
+            if version and not self.config.check_version_constraint(name, version):
+                constraint = self.config.version_constraints[name]
+                print_error(f"{name} {version} does not satisfy constraint {constraint}")
+                all_valid = False
+        
+        return all_valid
+    
+    @staticmethod
+    def _init_git_repo(project_dir: Path):
+        """Initialize git repository."""
+        try:
+            subprocess.run(['git', 'init'], cwd=project_dir, 
+                          check=True, capture_output=True)
+            subprocess.run(['git', 'add', '.'], cwd=project_dir,
+                          check=True, capture_output=True)
+            subprocess.run(['git', 'commit', '-m', 'Initial commit'], 
+                          cwd=project_dir, check=True, capture_output=True)
+            print_success("Git repository initialized")
+        except subprocess.CalledProcessError:
+            print_warning("Failed to initialize git repository")
 
 
 # ============================================================================
 # CLI Interface
 # ============================================================================
 
-def create_parser() -> argparse.ArgumentParser:
-    """Create argument parser."""
+def parse_env_with_defaults(env_vars: Dict[str, str]) -> Dict[str, str]:
+    """Parse environment variables with default values."""
+    result = {}
+    
+    for key, value in env_vars.items():
+        matches = re.findall(r'\$\{([^}:]+)(?::-([^}]*))?\}', value)
+        
+        if matches:
+            for var_name, default in matches:
+                env_value = os.environ.get(var_name, default)
+                value = value.replace(f'${{{var_name}:-{default}}}', env_value)
+                value = value.replace(f'${{{var_name}}}', env_value)
+        
+        result[key] = value
+    
+    return result
+
+
+def create_cli() -> argparse.ArgumentParser:
+    """Create CLI argument parser."""
     parser = argparse.ArgumentParser(
-        description="gradleInit - Modern Kotlin/Gradle Project Initializer",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Create project
-  %(prog)s my-project --group com.example
-  
-  # With config
-  %(prog)s my-project --save-config
-  
-  # Self-update
-  %(prog)s --self-update
-  
-  # Check updates
-  %(prog)s --check-updates
-  
-  # Sync with shared catalog
-  %(prog)s --sync-shared-catalog https://example.com/catalog.toml
-  
-  # Generate config from existing project
-  %(prog)s --generate-config
-        """
+        description='Gradle Project Initializer v' + SCRIPT_VERSION,
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
-    # Project creation
-    parser.add_argument('project_name', nargs='?', help="Project name")
-    parser.add_argument('--group', default='com.example', help="Group ID")
-    parser.add_argument('--version', default='0.1.0-SNAPSHOT', help="Project version")
-    parser.add_argument('--save-config', action='store_true', help="Save .gradleInit config")
+    parser.add_argument('--version', action='version', 
+                       version=f'gradleInit {SCRIPT_VERSION}')
     
-    # Update commands
-    parser.add_argument('--self-update', action='store_true', help="Update script from GitHub")
-    parser.add_argument('--check-updates', action='store_true', help="Check for dependency updates")
-    parser.add_argument('--dry-run', action='store_true', help="Show changes without applying")
-    parser.add_argument('--force', action='store_true', help="Force operation")
+    subparsers = parser.add_subparsers(dest='command', help='Commands')
     
-    # Config commands
-    parser.add_argument('--show-config', action='store_true', help="Show current config")
-    parser.add_argument('--generate-config', action='store_true', help="Generate config from project")
+    # Init command
+    init_parser = subparsers.add_parser('init', help='Initialize new project')
+    init_parser.add_argument('project_name', help='Project name')
+    init_parser.add_argument('--dir', type=Path, help='Target directory')
+    init_parser.add_argument('--template', dest='template_url',
+                            help='Template URL')
+    init_parser.add_argument('--template-version', dest='template_version',
+                            help='Template version')
+    init_parser.add_argument('--group', help='Project group ID')
+    init_parser.add_argument('--version', dest='project_version',
+                            help='Project version')
+    init_parser.add_argument('--gradle-version', dest='gradle_version',
+                            help='Gradle version')
+    init_parser.add_argument('--kotlin-version', dest='kotlin_version',
+                            help='Kotlin version')
+    init_parser.add_argument('--jdk-version', dest='jdk_version',
+                            help='JDK version')
     
-    # Shared catalog
-    parser.add_argument('--sync-shared-catalog', metavar='SOURCE', help="Sync with shared catalog (URL or file)")
+    # Config command
+    config_parser = subparsers.add_parser('config', help='Manage configuration')
+    config_parser.add_argument('--show', action='store_true',
+                              help='Show configuration')
+    config_parser.add_argument('--template', dest='template_url',
+                              help='Set template URL')
+    config_parser.add_argument('--group', help='Set default group')
+    config_parser.add_argument('--constraint', action='append', nargs=2,
+                              metavar=('NAME', 'VERSION'),
+                              help='Add version constraint')
     
-    # Spring Boot
-    parser.add_argument('--sync-spring-boot', metavar='VERSION', help="Sync with Spring Boot BOM")
-    
-    # Version
-    parser.add_argument('--version-info', action='version', version=f'%(prog)s {SCRIPT_VERSION}')
+    # Update command
+    update_parser = subparsers.add_parser('update', help='Check for updates')
+    update_parser.add_argument('--check', action='store_true',
+                              help='Check for updates')
+    update_parser.add_argument('--sync-shared', action='store_true',
+                              help='Sync shared catalog')
+    update_parser.add_argument('--sync-spring-boot', metavar='VERSION',
+                              help='Sync Spring Boot BOM')
+    update_parser.add_argument('--self-update', action='store_true',
+                              help='Update gradleInit script')
     
     return parser
 
 
 def main():
     """Main entry point."""
-    parser = create_parser()
+    parser = create_cli()
     args = parser.parse_args()
     
-    # Self-update
-    if args.self_update:
-        sys.exit(0 if SelfUpdater.update(args.dry_run, args.force) else 1)
+    if not args.command:
+        parser.print_help()
+        return 1
     
-    # Show config
-    if args.show_config:
-        config_manager = ConfigManager(Path.cwd())
-        config = config_manager.load()
-        
-        if config:
-            print_header("Current Configuration")
-            print(f"Project: {config.project_name} v{config.project_version}")
-            print(f"Group: {config.project_group}")
-            print(f"Kotlin: {config.kotlin_version}")
-            print(f"Created: {config.created}")
-            
-            if config.dependencies.shared_catalog.enabled:
-                print(f"\nShared Catalog: {config.dependencies.shared_catalog.source}")
-            
-            if config.dependencies.spring_boot.enabled:
-                print(f"\nSpring Boot: {config.dependencies.spring_boot.version}")
-        else:
-            print_warning("No .gradleInit config found")
-        
-        sys.exit(0)
+    # Load config
+    config_path = Path.home() / CONFIG_FILE_NAME
+    if not config_path.exists():
+        config_path = Path.cwd() / CONFIG_FILE_NAME
     
-    # Generate config
-    if args.generate_config:
-        config_manager = ConfigManager(Path.cwd())
-        config = config_manager.generate_from_project()
-        
-        if config:
-            config_manager.save(config)
-        
-        sys.exit(0 if config else 1)
+    base_config = GradleInitConfig.load_from_file(config_path) or GradleInitConfig()
     
-    # Check updates
-    if args.check_updates:
-        config_manager = ConfigManager(Path.cwd())
-        config = config_manager.load()
+    # Merge with ENV and args
+    env_vars = parse_env_with_defaults(dict(os.environ))
+    cli_args = {k: v for k, v in vars(args).items() if v is not None}
+    merged_config = base_config.merge_with_env_and_args(env_vars, cli_args)
+    
+    # Execute command
+    if args.command == 'init':
+        target_dir = args.dir or Path.cwd() / args.project_name
         
-        if not config:
-            print_warning("No .gradleInit config found. Run with --generate-config first.")
-            sys.exit(1)
+        additional_context = {}
+        if args.group:
+            additional_context['project_group'] = args.group
+        if args.project_version:
+            additional_context['project_version'] = args.project_version
         
-        update_manager = UpdateManager(Path.cwd(), config)
-        update_manager.check_all_updates(args.dry_run)
-        sys.exit(0)
-    
-    # Sync shared catalog
-    if args.sync_shared_catalog:
-        catalog_manager = VersionCatalogManager(Path.cwd())
-        success, changes = catalog_manager.sync_with_shared(
-            args.sync_shared_catalog,
-            override_local=False,
-            dry_run=args.dry_run
-        )
-        sys.exit(0 if success else 1)
-    
-    # Sync Spring Boot
-    if args.sync_spring_boot:
-        catalog_manager = VersionCatalogManager(Path.cwd())
-        success, changes = SpringBootBOM.sync_with_bom(
-            catalog_manager,
-            args.sync_spring_boot,
-            dry_run=args.dry_run
-        )
-        sys.exit(0 if success else 1)
-    
-    # Create project
-    if args.project_name:
-        success = ProjectCreator.create_simple_project(
+        initializer = GradleInitializer(merged_config)
+        success = initializer.init_project(
             args.project_name,
-            args.group,
-            args.version,
-            args.save_config
+            target_dir,
+            args.template_url,
+            additional_context
         )
-        sys.exit(0 if success else 1)
+        
+        # Check for updates if auto-check enabled
+        if UpdateManager.should_check_updates(merged_config):
+            print_info("\nChecking for updates...")
+            report = UpdateManager.check_all_updates(merged_config)
+            UpdateManager.print_update_report(report)
+            
+            # Update last check time
+            merged_config.last_update_check = datetime.now().isoformat()
+            merged_config.save_to_file(config_path)
+        
+        return 0 if success else 1
     
-    # No command - show help
-    parser.print_help()
-    sys.exit(0)
+    elif args.command == 'config':
+        if args.show:
+            print_header("Current Configuration")
+            
+            if merged_config.template_url:
+                print_info(f"Template URL: {merged_config.template_url}")
+            if merged_config.default_group:
+                print_info(f"Default Group: {merged_config.default_group}")
+            
+            if merged_config.shared_catalog.enabled:
+                print_info("\nShared Catalog:")
+                print_info(f"  Source: {merged_config.shared_catalog.source}")
+            
+            if merged_config.maven_central_libraries:
+                print_info("\nMaven Central Libraries:")
+                for lib in merged_config.maven_central_libraries:
+                    print_info(f"  {lib.group}:{lib.artifact}:{lib.version} ({lib.update_policy})")
+            
+            if merged_config.spring_boot_enabled:
+                print_info("\nSpring Boot:")
+                print_info(f"  Version: {merged_config.spring_boot_version}")
+                print_info(f"  Mode: {merged_config.spring_boot_compatibility}")
+        else:
+            if args.template_url:
+                merged_config.template_url = args.template_url
+            if args.group:
+                merged_config.default_group = args.group
+            if args.constraint:
+                for name, constraint in args.constraint:
+                    merged_config.version_constraints[name] = constraint
+            
+            config_path = Path.home() / CONFIG_FILE_NAME
+            merged_config.save_to_file(config_path)
+        
+        return 0
+    
+    elif args.command == 'update':
+        if args.self_update:
+            new_version = SelfUpdater.check_for_update()
+            if new_version:
+                print_info(f"New version available: {new_version}")
+                script_path = Path(__file__).resolve()
+                return 0 if SelfUpdater.perform_update(script_path) else 1
+            else:
+                print_success("Already at latest version")
+                return 0
+        
+        if args.check:
+            report = UpdateManager.check_all_updates(merged_config)
+            UpdateManager.print_update_report(report)
+            
+            merged_config.last_update_check = datetime.now().isoformat()
+            merged_config.save_to_file(config_path)
+            return 0
+        
+        if args.sync_shared:
+            catalog_path = Path.cwd() / 'gradle' / 'libs.versions.toml'
+            success = SharedCatalogManager.sync_catalog(merged_config, catalog_path)
+            return 0 if success else 1
+        
+        if args.sync_spring_boot:
+            catalog_path = Path.cwd() / 'gradle' / 'libs.versions.toml'
+            success = SpringBootBOM.sync_to_catalog(args.sync_spring_boot, catalog_path)
+            return 0 if success else 1
+    
+    return 1
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print_warning("\nOperation cancelled by user")
+        sys.exit(130)
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
