@@ -1,150 +1,68 @@
-# gradleInit.py - Modern Gradle Project Initializer
+# gradleInit.py
 
-Ein umfassendes Tool zum Erstellen und Verwalten von Kotlin/Gradle Multiproject Builds mit Template-Unterstützung, Jinja2 Template Engine und intelligenter Konfigurationsverwaltung.
+> Modern Kotlin/Gradle Project Initializer with intelligent dependency management
+
+A comprehensive tool for creating and managing Kotlin/Gradle multiproject builds with Jinja2 templating, Maven Central integration, Spring Boot BOM support, and team-wide version catalogs.
+
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/stotz/gradleInit)
+[![Python](https://img.shields.io/badge/python-3.7+-green.svg)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 
 ## Features
 
-✨ **Template Support**
-- Templates von GitHub, HTTPS URLs oder lokalem Filesystem
-- Git-Repositories mit Branch/Tag Unterstützung
-- Archive (ZIP, TAR.GZ) von HTTPS URLs
-- Lokale Templates mit `file://` URLs
+- 🎨 **Jinja2 Templates** - Full template engine with custom filters
+- 📦 **Custom URLs** - GitHub, HTTPS, or local file templates
+- 🔄 **Shared Catalogs** - Team-wide version management
+- 🌐 **Maven Central** - Auto-updates with breaking-change detection
+- 🍃 **Spring Boot BOM** - 600+ tested dependencies
+- ⚙️ **Smart Config** - Priority: CLI > ENV > .gradleInit
+- 📊 **Update Manager** - Coordinated updates from all sources
+- 🔧 **Self-Update** - Script updates itself
 
-🎨 **Jinja2 Template Engine**
-- Vollständige Jinja2 Syntax Unterstützung
-- Custom Filters: `camelCase`, `pascalCase`, `snakeCase`, `kebabCase`
-- Zugriff auf Umgebungsvariablen: `{{ env('MY_VAR', 'default') }}`
-- Zugriff auf Config-Werte: `{{ config('custom.key', 'default') }}`
+## Quick Start
 
-⚙️ **Konfigurationsmanagement**
-- `.gradleInit` Konfigurationsdatei (TOML-Format)
-- Umgebungsvariablen mit Default-Werten: `${VAR:-default}`
-- Prioritäten: CLI Args > ENV > `.gradleInit`
-- Version Pinning mit semantischer Versionierung
-
-📦 **Version Constraints**
-- Semantic Versioning Support: `>=1.2.0`, `<=2.0.0`, `~1.3.0`
-- Wildcard Patterns: `1.4.*`
-- Validierung bei Projekt-Initialisierung
-
-🔄 **Shared Version Catalog**
-- Zentrale Versionsverwaltung für Teams
-- Von GitHub, HTTPS oder lokalem File
-- Sync zwischen mehreren Projekten
-- Override-Mechanismus für lokale Anpassungen
-
-🌐 **Maven Central Integration**
-- Automatische Package-Updates
-- Breaking-Change Detection
-- Update Policies: `pinned`, `last-stable`, `latest`, `major-only`, `minor-only`
-- Smart Dependency Management
-
-🍃 **Spring Boot BOM Support**
-- Integration von 600+ getesteten Spring Boot Dependencies
-- Automatischer BOM Sync
-- Kompatibilitätsmodi: `pinned`, `last-stable`, `latest`
-- Hybrid-Ansatz mit eigenem Catalog
-
-🔧 **Intelligent Update Manager**
-- Koordinierte Updates aus allen Quellen
-- Auto-Check Intervalle (daily, weekly, monthly)
-- Update-Reports mit Breaking-Change Warnings
-- Self-Update Capability für das Script selbst
-
-## Installation
-
-### Voraussetzungen
-
-- Python 3.7 oder höher
-- Git (für Git-basierte Templates)
-
-### Abhängigkeiten installieren
+### Install
 
 ```bash
+# Install dependencies
 pip install jinja2 toml
-```
 
-**Oder mit pipx (empfohlen für isolierte Installation):**
-
-```bash
-pipx install --include-deps jinja2
-pipx inject gradleInit toml
-```
-
-### Script ausführbar machen
-
-```bash
+# Make executable
 chmod +x gradleInit.py
 ```
 
-Optional: In PATH verfügbar machen
+### Create Your First Project
 
 ```bash
-# Linux/macOS
-sudo ln -s $(pwd)/gradleInit.py /usr/local/bin/gradleInit
+# Simple project
+./gradleInit.py init my-project
 
-# Oder zum User-Bin-Verzeichnis
-mkdir -p ~/.local/bin
-ln -s $(pwd)/gradleInit.py ~/.local/bin/gradleInit
-# Stelle sicher, dass ~/.local/bin in deinem PATH ist
-```
-
-## Schnellstart
-
-### Projekt mit Default-Template initialisieren
-
-```bash
-./gradleInit.py init my-awesome-project
-```
-
-### Projekt mit Custom Template
-
-```bash
-# GitHub Repository
-./gradleInit.py init my-project --template https://github.com/username/gradle-template.git
-
-# Spezifischer Branch/Tag
-./gradleInit.py init my-project --template https://github.com/username/gradle-template.git --template-version v1.2.0
-
-# HTTPS Archive
-./gradleInit.py init my-project --template https://example.com/templates/kotlin-gradle.zip
-
-# Lokales Template
-./gradleInit.py init my-project --template file:///home/user/templates/gradle-kotlin
-```
-
-### Mit zusätzlichen Parametern
-
-```bash
+# With custom settings
 ./gradleInit.py init my-project \
   --group com.mycompany \
   --version 1.0.0 \
   --gradle-version 9.0 \
-  --kotlin-version 2.2.0 \
-  --jdk-version 21
+  --kotlin-version 2.2.0
 ```
 
-### Updates verwalten
+### Use Custom Templates
 
 ```bash
-# Alle Updates prüfen
-./gradleInit.py update --check
+# GitHub template
+./gradleInit.py init my-project \
+  --template https://github.com/user/gradle-template.git \
+  --template-version v1.2.0
 
-# Shared Catalog synchronisieren
-./gradleInit.py update --sync-shared
-
-# Spring Boot BOM synchronisieren
-./gradleInit.py update --sync-spring-boot 3.5.7
-
-# Script selbst aktualisieren
-./gradleInit.py update --self-update
+# Local template
+./gradleInit.py init my-project \
+  --template file:///path/to/template
 ```
 
-## Konfiguration
+## Configuration
 
-### .gradleInit Datei
+### Create .gradleInit
 
-Erstelle eine `.gradleInit` Datei in deinem Home-Verzeichnis oder Projekt-Root:
+Create `~/.gradleInit` for persistent settings:
 
 ```toml
 [template]
@@ -165,119 +83,164 @@ gradle_version = ">=9.0"
 kotlin_version = "~2.2.0"
 jdk_version = ">=21"
 
+# Shared version catalog for teams
 [dependencies.shared_catalog]
 enabled = true
-source = "https://github.com/myorg/shared-catalog/raw/main/gradle/libs.versions.toml"
+source = "https://github.com/myorg/shared-catalog/raw/main/libs.versions.toml"
 sync_on_update = true
 override_local = false
 
+# Track Maven Central libraries
 [[dependencies.maven_central.libraries]]
 group = "io.ktor"
 artifact = "ktor-server-core"
 version = "3.0.1"
 update_policy = "last-stable"
 
-[[dependencies.maven_central.libraries]]
-group = "com.fasterxml.jackson.core"
-artifact = "jackson-databind"
-version = "2.17.0"
-update_policy = "minor-only"
-
+# Spring Boot BOM integration
 [dependencies.spring_boot]
 enabled = true
 version = "3.5.7"
 compatibility_mode = "last-stable"
 
+# Auto-update settings
 [updates]
 auto_check = true
 check_interval = "weekly"
-last_check = "2025-01-15T10:30:00"
 
 [custom]
 author = "Your Name"
 license = "MIT"
-# Beliebige Custom-Werte für Templates
 ```
 
-### Konfiguration verwalten
+### Environment Variables
 
 ```bash
-# Konfiguration anzeigen
-./gradleInit.py config --show
-
-# Template URL setzen
-./gradleInit.py config --template https://github.com/myorg/gradle-template.git
-
-# Default Group setzen
-./gradleInit.py config --group com.mycompany
-
-# Version Constraint hinzufügen
-./gradleInit.py config --constraint gradle_version ">=9.0"
-./gradleInit.py config --constraint kotlin_version "~2.2.0"
-```
-
-### Umgebungsvariablen
-
-```bash
-# Template URL
-export GRADLE_INIT_TEMPLATE="https://github.com/stotz/gradleInit.git"
-export GRADLE_INIT_TEMPLATE_VERSION="v1.0.0"
-
-# Default Werte
+export GRADLE_INIT_TEMPLATE="https://github.com/myorg/template.git"
 export GRADLE_INIT_GROUP="com.mycompany"
-export GRADLE_INIT_VERSION="0.1.0"
-
-# Versionen
 export GRADLE_VERSION="9.0"
 export KOTLIN_VERSION="2.2.0"
-export JDK_VERSION="21"
 ```
 
-**Mit Default-Werten:**
-
+With defaults:
 ```bash
 export GRADLE_VERSION="${GRADLE_VERSION:-9.0}"
-export MY_CUSTOM_VAR="${MY_CUSTOM_VAR:-defaultValue}"
+export MY_VAR="${MY_VAR:-default}"
 ```
 
-### Prioritäten
+## Advanced Features
 
-Die Werte werden in folgender Reihenfolge überschrieben:
+### Shared Version Catalog
 
-1. **CLI Arguments** (höchste Priorität)
-2. **Umgebungsvariablen**
-3. **`.gradleInit` Config-Datei** (niedrigste Priorität)
+Perfect for teams to share dependency versions across projects:
 
+```toml
+[dependencies.shared_catalog]
+enabled = true
+source = "https://github.com/company/catalog/raw/main/libs.versions.toml"
+# or local: source = "file:///mnt/share/gradle-catalog.toml"
+```
+
+**Benefits:**
+- ✅ Centralized version management
+- ✅ Consistent dependencies across projects
+- ✅ Easy updates for entire team
+- ✅ Local overrides when needed
+
+### Maven Central Integration
+
+Automatic dependency updates with intelligent policies:
+
+```toml
+[[dependencies.maven_central.libraries]]
+group = "io.ktor"
+artifact = "ktor-server-core"
+version = "3.0.1"
+update_policy = "last-stable"
+```
+
+**Update Policies:**
+- `pinned` - Never update
+- `last-stable` - Latest stable version
+- `latest` - Including pre-releases
+- `major-only` - Major versions only
+- `minor-only` - Minor/patch versions only
+
+**Check for updates:**
 ```bash
-# Example: CLI Args überschreiben alles
-GRADLE_VERSION=8.0 ./gradleInit.py init my-project --gradle-version 9.0
-# Verwendet 9.0 (CLI gewinnt)
+./gradleInit.py update --check
 ```
 
-## Templates erstellen
+**Output:**
+```
+Update Report
+Generated: 2025-01-15T15:30:00
 
-### Verzeichnisstruktur
+Maven Central Updates:
+  ✓ io.ktor:ktor-server-core: 3.0.1 → 3.0.2
+  ⚠ com.example:lib: 2.5.0 → 3.0.0 [BREAKING]
+  → other-lib:module: Up to date
+```
+
+### Spring Boot BOM
+
+Use Spring Boot's 600+ tested dependencies:
+
+```toml
+[dependencies.spring_boot]
+enabled = true
+version = "3.5.7"
+compatibility_mode = "last-stable"
+```
+
+**Sync to project:**
+```bash
+./gradleInit.py update --sync-spring-boot 3.5.7
+```
+
+**Compatibility Modes:**
+- `pinned` - Fixed version
+- `last-stable` - Latest stable
+- `latest` - Including pre-releases
+
+### Version Constraints
+
+Enforce version requirements with semantic versioning:
+
+```toml
+[constraints]
+gradle_version = ">=9.0"      # Minimum 9.0
+kotlin_version = "~2.2.0"     # 2.2.x only
+jdk_version = "21.*"          # 21.0, 21.1, etc.
+```
+
+**Supported operators:**
+- `>=`, `<=`, `>`, `<` - Comparison
+- `~` - Tilde range (patch-level updates)
+- `*` - Wildcard
+- `==` - Exact match
+
+## Template Development
+
+### Template Structure
 
 ```
 my-template/
-├── .gitignore.j2
 ├── settings.gradle.kts.j2
 ├── build.gradle.kts.j2
 ├── gradle.properties.j2
-├── src/
-│   └── main/
-│       └── kotlin/
-│           └── {{ project_group|replace('.', '/') }}/
-│               └── Main.kt.j2
-└── README.md.j2
+├── .gitignore.j2
+├── README.md.j2
+└── src/
+    ├── main/kotlin/
+    │   └── Main.kt.j2
+    └── test/kotlin/
+        └── MainTest.kt.j2
 ```
 
-### Template Syntax
+### Jinja2 Syntax
 
-Templates verwenden Jinja2 Syntax. Dateien mit `.j2` Extension werden automatisch gerendert und die Extension wird entfernt.
-
-**Variablen:**
-
+**Variables:**
 ```kotlin
 // build.gradle.kts.j2
 group = "{{ project_group }}"
@@ -288,8 +251,7 @@ kotlin {
 }
 ```
 
-**Filters:**
-
+**Custom Filters:**
 ```kotlin
 // Main.kt.j2
 package {{ project_group }}
@@ -301,24 +263,17 @@ class {{ project_name|pascalCase }} {
 }
 ```
 
-Verfügbare Filter:
-- `camelCase`: `my-project` → `myProject`
-- `pascalCase`: `my-project` → `MyProject`
-- `snakeCase`: `my-project` → `my_project`
-- `kebabCase`: `my_project` → `my-project`
+Available filters: `camelCase`, `pascalCase`, `snakeCase`, `kebabCase`
 
-**Umgebungsvariablen:**
-
+**Environment Variables:**
 ```yaml
 # .github/workflows/ci.yml.j2
-name: CI
 env:
   DOCKER_REGISTRY: {{ env('DOCKER_REGISTRY', 'docker.io') }}
   BUILD_NUMBER: {{ env('BUILD_NUMBER', '0') }}
 ```
 
-**Config-Werte:**
-
+**Config Values:**
 ```kotlin
 // build.gradle.kts.j2
 description = "{{ config('custom.description', 'A Kotlin project') }}"
@@ -332,10 +287,8 @@ tasks.jar {
 }
 ```
 
-**Konditionelle Inhalte:**
-
+**Conditionals:**
 ```kotlin
-// build.gradle.kts.j2
 plugins {
     kotlin("jvm") version "{{ kotlin_version }}"
     {% if config('spring.enabled', false) %}
@@ -344,8 +297,7 @@ plugins {
 }
 ```
 
-**Schleifen:**
-
+**Loops:**
 ```kotlin
 // settings.gradle.kts.j2
 rootProject.name = "{{ project_name }}"
@@ -357,321 +309,192 @@ include("{{ module }}")
 
 ### Template Context
 
-Folgende Variablen sind standardmäßig verfügbar:
-
+Available variables:
 ```python
 {
-    'project_name': 'my-project',           # Projekt Name
-    'project_group': 'com.example',         # Group ID
-    'project_version': '0.1.0',             # Version
-    'gradle_version': '9.0',                # Gradle Version
-    'kotlin_version': '2.2.0',              # Kotlin Version
-    'jdk_version': '21',                    # JDK Version
-    'timestamp': '2025-01-15T10:30:00',    # ISO Timestamp
-    # Plus alle Werte aus [custom] Sektion der .gradleInit
+    'project_name': 'my-project',
+    'project_group': 'com.example',
+    'project_version': '0.1.0',
+    'gradle_version': '9.0',
+    'kotlin_version': '2.2.0',
+    'jdk_version': '21',
+    'timestamp': '2025-01-15T10:30:00',
+    # Plus all values from [custom] section
 }
 ```
 
-### Verzeichnisse und Dateien erstellen
+## CLI Reference
 
-**Verzeichnisse werden automatisch erstellt:**
+### Commands
 
-```
-src/main/kotlin/{{ project_group|replace('.', '/') }}/
-```
-
-Für `project_group = "com.example.myapp"`:
-
-```
-src/main/kotlin/com/example/myapp/
-```
-
-**Binärdateien kopieren:**
-
-Dateien ohne Template-Syntax (keine `{{ }}` oder `{% %}`) werden direkt kopiert:
-
-```
-my-template/
-├── gradle/
-│   └── wrapper/
-│       ├── gradle-wrapper.jar      # Wird kopiert
-│       └── gradle-wrapper.properties.j2  # Wird gerendert
+**Initialize Project:**
+```bash
+gradleInit.py init <name> [options]
+  --template <url>           # Template source
+  --template-version <ver>   # Branch/tag/commit
+  --group <group>            # Maven group ID
+  --version <version>        # Project version
+  --gradle-version <ver>     # Gradle version
+  --kotlin-version <ver>     # Kotlin version
+  --jdk-version <ver>        # JDK version
+  --dir <path>               # Target directory
 ```
 
-## Version Constraints
-
-### Unterstützte Operatoren
-
-```toml
-[constraints]
-# Exact match
-gradle_version = "9.0"
-gradle_version = "==9.0"
-
-# Greater than / Less than
-kotlin_version = ">=2.2.0"
-kotlin_version = "<=3.0.0"
-kotlin_version = ">2.1.0"
-kotlin_version = "<3.0.0"
-
-# Tilde (patch-level updates erlaubt)
-kotlin_version = "~2.2.0"  # Erlaubt 2.2.x
-
-# Wildcard
-jdk_version = "21.*"       # Erlaubt 21.0, 21.1, etc.
+**Manage Configuration:**
+```bash
+gradleInit.py config [options]
+  --show                     # Show current config
+  --template <url>           # Set template URL
+  --group <group>            # Set default group
+  --constraint <n> <ver>     # Add version constraint
 ```
 
-### Validierung
+**Update Management:**
+```bash
+gradleInit.py update [options]
+  --check                    # Check all updates
+  --sync-shared              # Sync shared catalog
+  --sync-spring-boot <ver>   # Sync Spring Boot BOM
+  --self-update              # Update gradleInit itself
+```
 
-Bei der Projekt-Initialisierung werden alle Version Constraints geprüft:
+## Use Cases
+
+### 1. Solo Developer
 
 ```bash
-$ ./gradleInit.py init my-project --kotlin-version 2.1.0
+# One-time setup
+./gradleInit.py config \
+  --template https://github.com/me/template.git \
+  --group com.myname
 
-# Mit constraint kotlin_version = ">=2.2.0":
-✗ kotlin_version 2.1.0 does not satisfy constraint >=2.2.0
+# Create projects
+./gradleInit.py init my-app
+./gradleInit.py init my-lib
 ```
 
-## Advanced Usage
+### 2. Team with Shared Catalog
 
-### Custom Template mit allen Features
+**Admin creates shared catalog:**
+```bash
+# Create shared-catalog.toml
+cat > shared-catalog.toml << EOF
+[versions]
+kotlin = "2.2.0"
+ktor = "3.0.2"
+
+[libraries]
+ktor-server = { group = "io.ktor", name = "ktor-server-core", version.ref = "ktor" }
+EOF
+
+# Commit to company repo
+git add shared-catalog.toml
+git commit -m "Add shared Gradle catalog"
+git push
+```
+
+**Developers use it:**
+```bash
+# Configure
+./gradleInit.py config \
+  --template https://github.com/company/template.git
+
+# Add to ~/.gradleInit:
+[dependencies.shared_catalog]
+enabled = true
+source = "https://github.com/company/shared-catalog/raw/main/shared-catalog.toml"
+
+# Projects automatically use shared catalog
+./gradleInit.py init customer-service
+./gradleInit.py init payment-service
+```
+
+### 3. Maven Central Tracking
 
 ```bash
-./gradleInit.py init enterprise-app \
-  --template https://github.com/myorg/enterprise-template.git \
-  --template-version v2.5.0 \
-  --group com.mycompany.enterprise \
-  --version 1.0.0-SNAPSHOT \
-  --gradle-version 9.0 \
-  --kotlin-version 2.2.0 \
-  --jdk-version 21 \
-  --dir ~/projects/enterprise-app
+# Configure tracked libraries
+cat >> ~/.gradleInit << EOF
+[[dependencies.maven_central.libraries]]
+group = "io.ktor"
+artifact = "ktor-server-core"
+version = "3.0.1"
+update_policy = "last-stable"
+
+[[dependencies.maven_central.libraries]]
+group = "com.fasterxml.jackson.core"
+artifact = "jackson-databind"
+version = "2.17.0"
+update_policy = "minor-only"
+EOF
+
+# Weekly auto-checks
+[updates]
+auto_check = true
+check_interval = "weekly"
+
+# Manual check
+./gradleInit.py update --check
 ```
 
-### Template-Entwicklung Workflow
-
-1. **Template Repository erstellen:**
+### 4. Spring Boot Projects
 
 ```bash
-mkdir gradle-template && cd gradle-template
-git init
+# Configure Spring Boot
+[dependencies.spring_boot]
+enabled = true
+version = "3.5.7"
+compatibility_mode = "last-stable"
+
+# Create Spring Boot project
+./gradleInit.py init my-spring-app
+
+# Sync BOM manually
+./gradleInit.py update --sync-spring-boot 3.5.7
 ```
 
-2. **Template-Dateien erstellen:**
+## Architecture
 
-```bash
-# Basis-Struktur
-touch settings.gradle.kts.j2
-touch build.gradle.kts.j2
-mkdir -p src/main/kotlin
-```
+### Class Overview
 
-3. **Lokal testen:**
+**Version Handling:**
+- `VersionInfo` - Semantic version parser
+- `VersionConstraint` - Constraint validator
 
-```bash
-./gradleInit.py init test-project --template file://$(pwd)
-```
+**Maven Integration:**
+- `MavenArtifact` - Artifact model
+- `MavenCentralClient` - REST API client
 
-4. **Auf GitHub pushen:**
+**Spring Boot:**
+- `SpringBootBOM` - BOM download & parse
 
-```bash
-git remote add origin https://github.com/username/gradle-template.git
-git push -u origin main
-git tag v1.0.0
-git push --tags
-```
+**Configuration:**
+- `SharedCatalogConfig` - Shared catalog settings
+- `MavenCentralLibrary` - Library tracking model
+- `GradleInitConfig` - Master configuration
 
-5. **Von GitHub verwenden:**
+**Managers:**
+- `SharedCatalogManager` - Catalog operations
+- `UpdateManager` - Update coordination
+- `SelfUpdater` - Script updates
 
-```bash
-./gradleInit.py init prod-project \
-  --template https://github.com/username/gradle-template.git \
-  --template-version v1.0.0
-```
+**Template Engine:**
+- `TemplateEngine` - Jinja2 integration
+- `TemplateSource` - URL/file handler
 
-### Shared Template mit Team
+**Project Creation:**
+- `GradleInitializer` - Main orchestrator
 
-1. **Template in .gradleInit konfigurieren:**
+### Code Quality
 
-```toml
-[template]
-url = "https://github.com/myorg/company-gradle-template.git"
-version = "v2.0.0"
+✅ **Modern Python** - Type hints, dataclasses, Python 3.7+  
+✅ **OOP Design** - Clear responsibilities, testable  
+✅ **Single File** - 1476 lines, well-organized  
+✅ **Error Handling** - Graceful degradation  
+✅ **Documentation** - Docstrings everywhere  
 
-[defaults]
-group = "com.myorg"
+## Examples
 
-[custom]
-company = "MyOrg Inc."
-license = "Proprietary"
-```
-
-2. **Template global verfügbar machen:**
-
-```bash
-# In ~/.gradleInit oder /etc/gradleInit
-cp .gradleInit ~/.gradleInit
-```
-
-3. **Team-Mitglieder initialisieren Projekte:**
-
-```bash
-# Verwendet automatisch das Company Template
-./gradleInit.py init new-service
-```
-
-## Best Practices
-
-### 1. Template Versionierung
-
-Verwende Git Tags für stabile Template-Versionen:
-
-```bash
-git tag -a v1.0.0 -m "Stable template version 1.0.0"
-git push --tags
-```
-
-Pinne Template-Version in `.gradleInit`:
-
-```toml
-[template]
-url = "https://github.com/myorg/template.git"
-version = "v1.0.0"  # Stabil, reproduzierbar
-```
-
-### 2. Separation of Concerns
-
-Erstelle spezialisierte Templates:
-
-```
-templates/
-├── kotlin-library/       # Für Libraries
-├── kotlin-app/          # Für Applications
-├── spring-boot/         # Für Spring Boot Apps
-└── android/             # Für Android Apps
-```
-
-### 3. Template Dokumentation
-
-Füge `TEMPLATE.md` zu jedem Template hinzu:
-
-```markdown
-# Template: Kotlin Library
-
-## Required Variables
-- project_name
-- project_group
-- project_version
-
-## Custom Configuration
-- custom.publish (boolean): Enable publishing to Maven Central
-- custom.license: Project license (default: MIT)
-```
-
-### 4. CI/CD Integration
-
-```yaml
-# .github/workflows/new-project.yml
-name: Create New Project
-on:
-  workflow_dispatch:
-    inputs:
-      project_name:
-        required: true
-      project_group:
-        required: true
-
-jobs:
-  create:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-      
-      - name: Install dependencies
-        run: pip install jinja2 toml
-      
-      - name: Create project
-        run: |
-          python gradleInit.py init ${{ inputs.project_name }} \
-            --group ${{ inputs.project_group }} \
-            --template ${{ secrets.TEMPLATE_URL }}
-```
-
-## Troubleshooting
-
-### Package nicht gefunden
-
-```
-Missing required packages: jinja2, toml
-Install with: pip install jinja2 toml
-```
-
-**Lösung:**
-
-```bash
-pip install jinja2 toml
-# Oder mit pipx
-pipx install --include-deps jinja2
-pipx inject gradleInit toml
-```
-
-### Template Download fehlgeschlagen
-
-```
-✗ Failed to fetch template: ...
-```
-
-**Lösungen:**
-
-1. **Prüfe URL:** Stelle sicher, dass die URL korrekt ist
-2. **Prüfe Berechtigungen:** Bei privaten Repos, nutze Git Credentials
-3. **Prüfe Netzwerk:** Teste mit `curl` oder `wget`
-4. **Nutze lokales Template:** `--template file:///path/to/template`
-
-### Template-Rendering Fehler
-
-```
-✗ Template error in settings.gradle.kts.j2: ...
-```
-
-**Debug-Strategie:**
-
-1. **Syntax prüfen:** Validiere Jinja2 Syntax online
-2. **Variablen prüfen:** `{{ variableName }}` statt `{{ variable_name }}`?
-3. **Filter prüfen:** Nutze nur verfügbare Filter
-4. **Escaping:** Nutze `{% raw %}...{% endraw %}` für literale `{{ }}`
-
-### Version Constraint fehlgeschlagen
-
-```
-✗ gradle_version 8.5 does not satisfy constraint >=9.0
-```
-
-**Lösungen:**
-
-1. **Version anpassen:** `--gradle-version 9.0`
-2. **Constraint ändern:** `.gradleInit` bearbeiten
-3. **Constraint entfernen:** Zeile aus `[constraints]` löschen
-
-### Git Repository Fehler
-
-```
-⚠ Failed to initialize git repository
-```
-
-**Ursachen:**
-
-1. Git nicht installiert: `sudo apt install git` (Linux)
-2. Keine Git-Config: `git config --global user.name "..."`
-
-## Beispiele
-
-### Minimales Template
+### Minimal Template
 
 ```
 minimal-template/
@@ -680,13 +503,11 @@ minimal-template/
 ```
 
 **settings.gradle.kts.j2:**
-
 ```kotlin
 rootProject.name = "{{ project_name }}"
 ```
 
 **build.gradle.kts.j2:**
-
 ```kotlin
 plugins {
     kotlin("jvm") version "{{ kotlin_version }}"
@@ -701,10 +522,6 @@ repositories {
 
 dependencies {
     testImplementation(kotlin("test"))
-}
-
-tasks.test {
-    useJUnitPlatform()
 }
 ```
 
@@ -721,18 +538,17 @@ multimodule-template/
 ```
 
 **settings.gradle.kts.j2:**
-
 ```kotlin
 rootProject.name = "{{ project_name }}"
 
-include("core")
-include("app")
+{% for module in config('modules', ['core', 'app']) %}
+include("{{ module }}")
+{% endfor %}
 ```
 
 ### Spring Boot Template
 
-Mit `.gradleInit`:
-
+With config:
 ```toml
 [custom]
 spring_version = "3.2.0"
@@ -740,7 +556,6 @@ spring_modules = ["web", "data-jpa", "security"]
 ```
 
 **build.gradle.kts.j2:**
-
 ```kotlin
 plugins {
     kotlin("jvm") version "{{ kotlin_version }}"
@@ -756,15 +571,162 @@ dependencies {
 }
 ```
 
-## Lizenz
+## Troubleshooting
 
-MIT License - siehe LICENSE Datei für Details.
+### Missing packages
+
+```
+Error: Missing required packages: jinja2, toml
+```
+
+**Solution:**
+```bash
+pip install jinja2 toml
+```
+
+### Template not found
+
+```
+Error: Failed to fetch template
+```
+
+**Solutions:**
+1. Check URL: `curl <template-url>`
+2. Use local template: `--template file:///path`
+3. Check git credentials for private repos
+
+### Version constraint failed
+
+```
+Error: gradle_version 8.5 does not satisfy constraint >=9.0
+```
+
+**Solutions:**
+1. Update version: `--gradle-version 9.0`
+2. Change constraint in `.gradleInit`
+3. Remove constraint
+
+### Git initialization failed
+
+**Cause:** Git not installed or not configured
+
+**Solution:**
+```bash
+# Install git
+sudo apt install git  # Linux
+brew install git      # macOS
+
+# Configure
+git config --global user.name "Your Name"
+git config --global user.email "you@example.com"
+```
+
+## Best Practices
+
+### 1. Version Control Templates
+
+```bash
+# Tag stable versions
+git tag -a v1.0.0 -m "Stable template v1.0.0"
+git push --tags
+
+# Pin in config
+[template]
+version = "v1.0.0"  # Stable, reproducible
+```
+
+### 2. Separate Templates by Type
+
+```
+templates/
+├── kotlin-library/       # For libraries
+├── kotlin-app/          # For applications
+├── spring-boot/         # For Spring Boot
+└── android/             # For Android
+```
+
+### 3. Document Templates
+
+Add `TEMPLATE.md` to each template:
+
+```markdown
+# Kotlin Library Template
+
+## Required Variables
+- project_name
+- project_group
+- project_version
+
+## Custom Configuration
+- custom.publish (boolean): Enable Maven Central publishing
+- custom.license: Project license (default: MIT)
+
+## Example
+```toml
+[custom]
+publish = true
+license = "Apache-2.0"
+```
+
+### 4. CI/CD Integration
+
+**GitHub Actions:**
+```yaml
+name: Create Project
+on: workflow_dispatch
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - run: pip install jinja2 toml
+      - run: |
+          python gradleInit.py init ${{ github.event.inputs.name }} \
+            --template ${{ secrets.TEMPLATE_URL }}
+```
 
 ## Contributing
 
-Contributions sind willkommen! Bitte erstelle einen Pull Request oder Issue auf GitHub.
+Contributions are welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file for details.
 
 ## Support
 
-- GitHub Issues: https://github.com/stotz/gradleInit/issues
-- Dokumentation: https://github.com/stotz/gradleInit/wiki
+- **Issues**: https://github.com/stotz/gradleInit/issues
+- **Discussions**: https://github.com/stotz/gradleInit/discussions
+- **Documentation**: https://github.com/stotz/gradleInit/wiki
+
+## Changelog
+
+### v1.1.0 (Current)
+- ✨ Added shared version catalog support
+- ✨ Added Maven Central integration
+- ✨ Added Spring Boot BOM support
+- ✨ Added intelligent update manager
+- ✨ Added self-update capability
+- ✨ Added breaking-change detection
+- ✨ Added auto-check scheduling
+- 🐛 Various bug fixes and improvements
+
+### v2.0.0
+- ✨ Initial release with Jinja2 templating
+- ✨ Custom URL support
+- ✨ Version constraints
+- ✨ Configuration management
+
+---
+
+**Made with ❤️ for the Kotlin/Gradle community**
