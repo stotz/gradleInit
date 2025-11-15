@@ -31,10 +31,141 @@ from typing import Dict, List, Optional, Tuple, Any
 # Version & Constants
 # ============================================================================
 
-SCRIPT_VERSION = "1.3.0"
+SCRIPT_VERSION = "1.3.16"
 MODULES_REPO = "https://github.com/stotz/gradleInitModules.git"
 TEMPLATES_REPO = "https://github.com/stotz/gradleInitTemplates.git"
-MODULES_VERSION = "v1.3.0"  # Or "main" for latest
+MODULES_VERSION = "main"  # Use main branch (v1.3.0 tag doesn't exist yet)
+
+# Platform detection
+IS_WINDOWS = sys.platform.startswith('win')
+
+# Default Gradle version
+DEFAULT_GRADLE_VERSION = "9.2.0"
+GRADLE_VERSIONS_URL = "https://services.gradle.org/versions/all"
+
+
+# ============================================================================
+# Gradle Version Management
+# ============================================================================
+
+def fetch_gradle_versions(include_rc: bool = False, include_nightly: bool = False) -> List[str]:
+    """
+    Fetch available Gradle versions from services.gradle.org
+    
+    Args:
+        include_rc: Include release candidates
+        include_nightly: Include nightly builds
+        
+    Returns:
+        List of version strings, sorted newest first
+    """
+    try:
+        import urllib.request
+        
+        with urllib.request.urlopen(GRADLE_VERSIONS_URL, timeout=10) as response:
+            data = json.loads(response.read().decode('utf-8'))
+        
+        versions = []
+        for item in data:
+            version = item.get('version', '')
+            if not version:
+                continue
+            
+            # Filter based on preferences
+            if 'nightly' in version.lower() and not include_nightly:
+                continue
+            if 'rc' in version.lower() and not include_rc:
+                continue
+            
+            versions.append(version)
+        
+        return versions
+        
+    except Exception as e:
+        print_warning(f"Could not fetch Gradle versions: {e}")
+        return []
+
+
+def get_latest_gradle_version(include_rc: bool = False) -> Optional[str]:
+    """
+    Get the latest stable Gradle version
+    
+    Args:
+        include_rc: Include release candidates
+        
+    Returns:
+        Latest version string or None if fetch failed
+    """
+    versions = fetch_gradle_versions(include_rc=include_rc, include_nightly=False)
+    
+    # Filter for stable releases (no rc, no milestone)
+    if not include_rc:
+        stable_versions = [v for v in versions 
+                          if not any(x in v.lower() for x in ['rc', 'milestone', 'beta', 'alpha'])]
+        if stable_versions:
+            return stable_versions[0]
+    
+    return versions[0] if versions else None
+
+
+def select_gradle_version_interactive() -> str:
+    """
+    Interactive Gradle version selection
+    
+    Returns:
+        Selected version string
+    """
+    print()
+    print("=" * 70)
+    print("  Select Gradle Version")
+    print("=" * 70)
+    print()
+    print("Fetching available Gradle versions...")
+    
+    versions = fetch_gradle_versions(include_rc=False, include_nightly=False)
+    
+    if not versions:
+        print_warning("Could not fetch versions from gradle.org")
+        print_info(f"Using default: {DEFAULT_GRADLE_VERSION}")
+        return DEFAULT_GRADLE_VERSION
+    
+    # Show top 15 versions
+    print()
+    print("Available versions (showing latest 15 stable releases):")
+    print()
+    
+    display_versions = versions[:15]
+    for i, version in enumerate(display_versions, 1):
+        marker = " (latest)" if i == 1 else ""
+        print(f"  {i:2}. {version}{marker}")
+    
+    print()
+    print(f"  0. Use default ({DEFAULT_GRADLE_VERSION})")
+    print()
+    
+    while True:
+        try:
+            choice = input("Enter number (0-15) or version string: ").strip()
+            
+            # Direct version string
+            if '.' in choice:
+                return choice
+            
+            # Number selection
+            num = int(choice)
+            if num == 0:
+                return DEFAULT_GRADLE_VERSION
+            if 1 <= num <= len(display_versions):
+                return display_versions[num - 1]
+            
+            print_error(f"Invalid selection. Please enter 0-{len(display_versions)}")
+            
+        except ValueError:
+            print_error("Invalid input. Enter a number or version string")
+        except KeyboardInterrupt:
+            print()
+            print_info(f"Using default: {DEFAULT_GRADLE_VERSION}")
+            return DEFAULT_GRADLE_VERSION
 
 
 # ============================================================================
@@ -167,6 +298,42 @@ def print_info(message: str):
 def print_warning(message: str):
     """Print warning message"""
     print(f"⚠ {message}")
+
+
+def parse_github_url(url: str) -> Optional[Tuple[str, Optional[str]]]:
+    """
+    Parse GitHub URL and extract clone URL and subdirectory.
+    
+    Supports formats:
+    - https://github.com/user/repo
+    - https://github.com/user/repo.git
+    - https://github.com/user/repo/tree/branch/subdir
+    - github.com/user/repo/tree/branch/path/to/template
+    
+    Args:
+        url: GitHub URL
+        
+    Returns:
+        Tuple of (clone_url, subdir_path) or None if not a GitHub URL
+        
+    Examples:
+        >>> parse_github_url("https://github.com/stotz/gradleInitTemplates/tree/main/kotlin-single")
+        ('https://github.com/stotz/gradleInitTemplates.git', 'kotlin-single')
+        
+        >>> parse_github_url("https://github.com/stotz/gradleInitTemplates")
+        ('https://github.com/stotz/gradleInitTemplates.git', None)
+    """
+    # Pattern: github.com/user/repo(/tree/branch/subdir)?
+    pattern = r'(?:https?://)?github\.com/([^/]+)/([^/]+?)(?:\.git)?(?:/tree/[^/]+/(.+))?/?$'
+    match = re.match(pattern, url)
+    
+    if not match:
+        return None
+    
+    user, repo, subdir = match.groups()
+    clone_url = f"https://github.com/{user}/{repo}.git"
+    
+    return (clone_url, subdir if subdir else None)
 
 
 # ============================================================================
@@ -517,16 +684,59 @@ class TemplateRepository:
         print_info(f"Cloning {self.name} templates from {self.url}...")
 
         try:
-            subprocess.run(
-                ['git', 'clone', '--depth', '1', self.url, str(self.path)],
-                check=True,
-                capture_output=True,
-                text=True
-            )
-            print_success(f"Cloned {self.name} templates")
-            return True
+            # Check if it's a GitHub tree URL (e.g., .../tree/main/subdir)
+            github_info = parse_github_url(self.url)
+            
+            if github_info:
+                clone_url, subdir = github_info
+                
+                # Clone to temporary directory
+                temp_dir = self.path.parent / f"{self.path.name}_temp"
+                if temp_dir.exists():
+                    shutil.rmtree(temp_dir)
+                
+                subprocess.run(
+                    ['git', 'clone', '--depth', '1', clone_url, str(temp_dir)],
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+                
+                # If subdirectory specified, move just that subdir
+                if subdir:
+                    source = temp_dir / subdir
+                    if not source.exists():
+                        shutil.rmtree(temp_dir)
+                        print_error(f"Subdirectory '{subdir}' not found in repository")
+                        return False
+                    
+                    # Move subdirectory contents to target
+                    shutil.copytree(source, self.path)
+                    shutil.rmtree(temp_dir)
+                else:
+                    # Move entire repo to target (remove .git)
+                    shutil.copytree(temp_dir, self.path, 
+                                   ignore=shutil.ignore_patterns('.git'))
+                    shutil.rmtree(temp_dir)
+                
+                print_success(f"Cloned {self.name} templates")
+                return True
+            else:
+                # Regular git URL - direct clone
+                subprocess.run(
+                    ['git', 'clone', '--depth', '1', self.url, str(self.path)],
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+                print_success(f"Cloned {self.name} templates")
+                return True
+                
         except subprocess.CalledProcessError as e:
             print_error(f"Failed to clone: {e.stderr}")
+            return False
+        except Exception as e:
+            print_error(f"Failed to clone: {e}")
             return False
 
     def update(self) -> bool:
@@ -658,20 +868,64 @@ class TemplateRepositoryManager:
 
         return templates
 
-    def find_template(self, template_name: str) -> Optional[Path]:
-        """Find template by name across all repositories"""
-        # Try official first
+    def find_template(self, template_spec: str) -> Optional[Path]:
+        """
+        Find template by name or URL across all repositories.
+        
+        Args:
+            template_spec: Template name, local path, or GitHub URL
+            
+        Returns:
+            Path to template directory or None
+        """
+        # 1. Check if it's a URL (GitHub or other git)
+        if template_spec.startswith(('http://', 'https://', 'git@', 'github.com')):
+            return self._handle_template_url(template_spec)
+        
+        # 2. Check if it's a local path
+        path = Path(template_spec)
+        if path.exists() and path.is_dir():
+            if (path / "TEMPLATE.md").exists():
+                return path.resolve()
+        
+        # 3. Try official repository
+        self.ensure_official_templates()
         if 'official' in self.repositories:
-            path = self.repositories['official'].get_template_path(template_name)
-            if path:
-                return path
-
-        # Try custom repositories
+            tmpl_path = self.repositories['official'].get_template_path(template_spec)
+            if tmpl_path:
+                return tmpl_path
+        
+        # 4. Try custom repositories
         for repo in self.repositories.values():
-            path = repo.get_template_path(template_name)
-            if path:
-                return path
-
+            tmpl_path = repo.get_template_path(template_spec)
+            if tmpl_path:
+                return tmpl_path
+        
+        return None
+    
+    def _handle_template_url(self, url: str) -> Optional[Path]:
+        """Handle template from URL (GitHub or git)"""
+        # Create cache directory name from URL hash
+        cache_name = hashlib.md5(url.encode()).hexdigest()[:12]
+        cache_dir = self.paths.cache_dir / cache_name
+        
+        # If already cached, return it
+        if cache_dir.exists() and (cache_dir / "TEMPLATE.md").exists():
+            print_info("Using cached template")
+            return cache_dir
+        
+        # Download template
+        print_info(f"Downloading template from {url}...")
+        
+        temp_repo = TemplateRepository("temp", cache_dir, url)
+        if temp_repo.clone():
+            if (cache_dir / "TEMPLATE.md").exists():
+                return cache_dir
+            else:
+                print_error("Downloaded repository is not a valid template (missing TEMPLATE.md)")
+                shutil.rmtree(cache_dir, ignore_errors=True)
+                return None
+        
         return None
 
     def add_custom_repository(self, name: str, url: str) -> bool:
@@ -847,7 +1101,9 @@ class DynamicCLIBuilder:
         # Version arguments
         versions_group = init_parser.add_argument_group('Version arguments')
         versions_group.add_argument('--gradle-version',
-                                    help='Gradle version')
+                                    help='Gradle version (e.g. 9.2.0) or "latest"')
+        versions_group.add_argument('--select-gradle-version', action='store_true',
+                                    help='Interactively select Gradle version')
         versions_group.add_argument('--kotlin-version',
                                     help='Kotlin version')
         versions_group.add_argument('--jdk-version',
@@ -1073,12 +1329,13 @@ class ContextBuilder:
 # Template Engine - Jinja2 Setup
 # ============================================================================
 
-def setup_jinja2_environment(template_path: Path) -> jinja2.Environment:
+def setup_jinja2_environment(template_path: Path, context: Dict[str, Any] = None) -> jinja2.Environment:
     """
     Setup Jinja2 environment with custom filters and tests
 
     Args:
         template_path: Path to template directory
+        context: Template context for config function
 
     Returns:
         Configured Jinja2 environment
@@ -1107,6 +1364,24 @@ def setup_jinja2_environment(template_path: Path) -> jinja2.Environment:
     # Custom tests
     env.tests['springboot'] = lambda x: 'springboot' in str(x).lower()
     env.tests['ktor'] = lambda x: 'ktor' in str(x).lower()
+
+    # Add config function as global
+    if context:
+        def config(key: str, default: Any = None) -> Any:
+            """
+            Get config value by dot-notation key with default fallback
+            Example: config('custom.company', 'Unknown')
+            """
+            keys = key.split('.')
+            value = context
+            for k in keys:
+                if isinstance(value, dict) and k in value:
+                    value = value[k]
+                else:
+                    return default
+            return value
+        
+        env.globals['config'] = config
 
     return env
 
@@ -1191,7 +1466,7 @@ class ProjectGenerator:
         self.template_path = template_path
         self.context = context
         self.target_path = target_path
-        self.jinja_env = setup_jinja2_environment(template_path)
+        self.jinja_env = setup_jinja2_environment(template_path, context)
 
     def generate(self) -> bool:
         """
@@ -1360,13 +1635,24 @@ class ProjectGenerator:
         return path.name in self.SKIP_PATTERNS
 
     def _run_post_generation_tasks(self):
-        """Run post-generation tasks (git init, etc.)"""
+        """Run post-generation tasks (gradle wrapper, git init, etc.)"""
         print_info("Running post-generation tasks...")
+        print_info("*** gradleInit.py v010 - VERBOSE MODE ***")
+
+        # Generate Gradle Wrapper if build.gradle.kts or build.gradle exists
+        gradle_build = self.target_path / 'build.gradle.kts'
+        if not gradle_build.exists():
+            gradle_build = self.target_path / 'build.gradle'
+        
+        if gradle_build.exists():
+            self._generate_gradle_wrapper()
 
         # Initialize git repository
         if GIT_AVAILABLE:
             try:
                 # Git init
+                print_info("Executing: git init")
+                print_info(f"Working directory: {self.target_path}")
                 result = subprocess.run(
                     ['git', 'init'],
                     cwd=self.target_path,
@@ -1374,9 +1660,12 @@ class ProjectGenerator:
                     text=True,
                     check=True
                 )
+                if result.stdout.strip():
+                    print(f"  {result.stdout.strip()}")
 
                 # Git add
-                subprocess.run(
+                print_info("Executing: git add .")
+                result = subprocess.run(
                     ['git', 'add', '.'],
                     cwd=self.target_path,
                     capture_output=True,
@@ -1385,20 +1674,181 @@ class ProjectGenerator:
                 )
 
                 # Git commit
-                subprocess.run(
+                print_info("Executing: git commit -m 'Initial commit from gradleInit'")
+                result = subprocess.run(
                     ['git', 'commit', '-m', 'Initial commit from gradleInit'],
                     cwd=self.target_path,
                     capture_output=True,
                     text=True,
                     check=True
                 )
+                if result.stdout.strip():
+                    print(f"  {result.stdout.strip()}")
 
                 print_success("Git repository initialized")
 
             except subprocess.CalledProcessError as e:
-                print_warning(f"Git initialization failed: {e.stderr}")
+                print_warning(f"Git initialization failed")
+                if e.stderr:
+                    print_info("Error output:")
+                    for line in e.stderr.strip().split('\n'):
+                        print(f"  {line}")
         else:
             print_info("Git not available - skipping repository initialization")
+
+    def _generate_gradle_wrapper(self):
+        """
+        Generate Gradle Wrapper using the reliable empty-file method.
+        
+        This method:
+        1. Creates empty build.gradle.kts and settings.gradle.kts
+        2. Runs 'gradle wrapper' to generate wrapper files
+        3. Deletes the empty placeholder files
+        4. Lets the template system generate the real files
+        
+        This avoids Constructor errors from incomplete/complex build files.
+        """
+        
+        # Check if wrapper already exists
+        gradlew = self.target_path / ('gradlew.bat' if IS_WINDOWS else 'gradlew')
+        if gradlew.exists():
+            print_info("Gradle Wrapper already exists")
+            return
+        
+        build_file = self.target_path / 'build.gradle.kts'
+        settings_file = self.target_path / 'settings.gradle.kts'
+        
+        # Remember if files existed before (from templates)
+        build_existed = build_file.exists()
+        settings_existed = settings_file.exists()
+        
+        # Save content if files existed
+        build_content = build_file.read_text() if build_existed else None
+        settings_content = settings_file.read_text() if settings_existed else None
+        
+        try:
+            # Get Gradle version from context (fallback to default)
+            gradle_version = self.context.get('gradle_version', DEFAULT_GRADLE_VERSION)
+            
+            # Step 1: Create empty placeholder files
+            if not build_existed:
+                build_file.touch()
+            else:
+                # Temporarily replace with empty file
+                build_file.write_text("")
+                
+            if not settings_existed:
+                settings_file.touch()
+            else:
+                # Temporarily replace with empty file
+                settings_file.write_text("")
+            
+            # Step 1.5: Stop Gradle daemon to clear cached Kotlin DSL
+            # This is CRITICAL to avoid Constructor errors from cached compilations
+            try:
+                print_info("Stopping Gradle daemon to clear cache...")
+                if IS_WINDOWS:
+                    subprocess.run('gradle --stop', shell=True, capture_output=True, timeout=10)
+                else:
+                    subprocess.run(['gradle', '--stop'], capture_output=True, timeout=10)
+            except Exception:
+                pass  # Ignore errors - daemon might not be running
+            
+            # Step 2: Generate wrapper
+            cmd_list = ['gradle', 'wrapper', '--gradle-version', gradle_version]
+            print_info(f"Executing: {' '.join(cmd_list)}")
+            print_info(f"Working directory: {self.target_path}")
+            
+            # On Windows, use shell=True and string command to handle shims/wrappers
+            if IS_WINDOWS:
+                cmd = ' '.join(cmd_list)
+                result = subprocess.run(
+                    cmd,
+                    cwd=self.target_path,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    shell=True
+                )
+            else:
+                result = subprocess.run(
+                    cmd_list,
+                    cwd=self.target_path,
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+            
+            print_info(f"Process exit code: {result.returncode}")
+            
+            # Show stdout if present
+            if result.stdout and result.stdout.strip():
+                print_info("Standard output:")
+                for line in result.stdout.strip().split('\n'):
+                    print(f"  {line}")
+            
+            # Show stderr if present
+            if result.stderr and result.stderr.strip():
+                print_info("Error output:")
+                for line in result.stderr.strip().split('\n'):
+                    print(f"  {line}")
+            
+            if result.returncode == 0:
+                print_success(f"Gradle Wrapper {gradle_version} generated")
+                
+                # Step 3: Restore original files or delete placeholders
+                if build_existed and build_content:
+                    build_file.write_text(build_content)
+                elif not build_existed:
+                    build_file.unlink()
+                    
+                if settings_existed and settings_content:
+                    settings_file.write_text(settings_content)
+                elif not settings_existed:
+                    settings_file.unlink()
+            else:
+                print_warning("Gradle wrapper generation failed")
+                print_info(f"You can run manually: gradle wrapper --gradle-version {gradle_version}")
+                
+                # Restore original files on failure
+                if build_existed and build_content:
+                    build_file.write_text(build_content)
+                if settings_existed and settings_content:
+                    settings_file.write_text(settings_content)
+                
+        except FileNotFoundError as e:
+            print_warning(f"Gradle not found in PATH: {e}")
+            print_info("  Install Gradle: https://gradle.org/install/")
+            gradle_version = self.context.get('gradle_version', DEFAULT_GRADLE_VERSION)
+            print_info(f"  Or run manually: gradle wrapper --gradle-version {gradle_version}")
+            
+            # Restore original files on error
+            if build_existed and build_content:
+                build_file.write_text(build_content)
+            if settings_existed and settings_content:
+                settings_file.write_text(settings_content)
+                
+        except subprocess.TimeoutExpired:
+            print_warning("Gradle wrapper generation timed out (60s)")
+            gradle_version = self.context.get('gradle_version', DEFAULT_GRADLE_VERSION)
+            print_info(f"  You can run manually: gradle wrapper --gradle-version {gradle_version}")
+            
+            # Restore original files on error
+            if build_existed and build_content:
+                build_file.write_text(build_content)
+            if settings_existed and settings_content:
+                settings_file.write_text(settings_content)
+                
+        except Exception as e:
+            print_warning(f"Unexpected error: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Restore original files on error
+            if build_existed and build_content:
+                build_file.write_text(build_content)
+            if settings_existed and settings_content:
+                settings_file.write_text(settings_content)
 
 
 # ============================================================================
@@ -1627,6 +2077,32 @@ def handle_init_command(args: argparse.Namespace,
             for req_name, req_version in requirements.items():
                 print(f"  • {req_name}: {req_version}")
             print()
+
+        # Handle Gradle version selection
+        gradle_version = None
+        
+        if args.select_gradle_version:
+            # Interactive selection
+            gradle_version = select_gradle_version_interactive()
+        elif args.gradle_version:
+            # Explicitly specified
+            if args.gradle_version.lower() == 'latest':
+                print_info("Fetching latest Gradle version...")
+                gradle_version = get_latest_gradle_version()
+                if not gradle_version:
+                    print_warning("Could not fetch latest version")
+                    gradle_version = DEFAULT_GRADLE_VERSION
+                print_success(f"Latest Gradle version: {gradle_version}")
+            else:
+                gradle_version = args.gradle_version
+        else:
+            # Use default
+            gradle_version = DEFAULT_GRADLE_VERSION
+        
+        # Override CLI args with selected version
+        args.gradle_version = gradle_version
+        print_info(f"Using Gradle version: {gradle_version}")
+        print()
 
         # Build rendering context
         config = load_config(paths.config_file)
