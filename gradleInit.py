@@ -40,7 +40,7 @@ MODULES_VERSION = "main"  # Use main branch (v1.3.0 tag doesn't exist yet)
 IS_WINDOWS = sys.platform.startswith('win')
 
 # Default Gradle version
-DEFAULT_GRADLE_VERSION = "9.2.0"
+DEFAULT_GRADLE_VERSION = "8.14"
 GRADLE_VERSIONS_URL = "https://services.gradle.org/versions/all"
 
 
@@ -51,36 +51,36 @@ GRADLE_VERSIONS_URL = "https://services.gradle.org/versions/all"
 def fetch_gradle_versions(include_rc: bool = False, include_nightly: bool = False) -> List[str]:
     """
     Fetch available Gradle versions from services.gradle.org
-    
+
     Args:
         include_rc: Include release candidates
         include_nightly: Include nightly builds
-        
+
     Returns:
         List of version strings, sorted newest first
     """
     try:
         import urllib.request
-        
+
         with urllib.request.urlopen(GRADLE_VERSIONS_URL, timeout=10) as response:
             data = json.loads(response.read().decode('utf-8'))
-        
+
         versions = []
         for item in data:
             version = item.get('version', '')
             if not version:
                 continue
-            
+
             # Filter based on preferences
             if 'nightly' in version.lower() and not include_nightly:
                 continue
             if 'rc' in version.lower() and not include_rc:
                 continue
-            
+
             versions.append(version)
-        
+
         return versions
-        
+
     except Exception as e:
         print_warning(f"Could not fetch Gradle versions: {e}")
         return []
@@ -89,29 +89,29 @@ def fetch_gradle_versions(include_rc: bool = False, include_nightly: bool = Fals
 def get_latest_gradle_version(include_rc: bool = False) -> Optional[str]:
     """
     Get the latest stable Gradle version
-    
+
     Args:
         include_rc: Include release candidates
-        
+
     Returns:
         Latest version string or None if fetch failed
     """
     versions = fetch_gradle_versions(include_rc=include_rc, include_nightly=False)
-    
+
     # Filter for stable releases (no rc, no milestone)
     if not include_rc:
-        stable_versions = [v for v in versions 
-                          if not any(x in v.lower() for x in ['rc', 'milestone', 'beta', 'alpha'])]
+        stable_versions = [v for v in versions
+                           if not any(x in v.lower() for x in ['rc', 'milestone', 'beta', 'alpha'])]
         if stable_versions:
             return stable_versions[0]
-    
+
     return versions[0] if versions else None
 
 
 def select_gradle_version_interactive() -> str:
     """
     Interactive Gradle version selection
-    
+
     Returns:
         Selected version string
     """
@@ -121,51 +121,84 @@ def select_gradle_version_interactive() -> str:
     print("=" * 70)
     print()
     print("Fetching available Gradle versions...")
-    
+
     versions = fetch_gradle_versions(include_rc=False, include_nightly=False)
-    
+
     if not versions:
         print_warning("Could not fetch versions from gradle.org")
         print_info(f"Using default: {DEFAULT_GRADLE_VERSION}")
         return DEFAULT_GRADLE_VERSION
-    
+
     # Show top 15 versions
     print()
     print("Available versions (showing latest 15 stable releases):")
     print()
-    
+
     display_versions = versions[:15]
     for i, version in enumerate(display_versions, 1):
         marker = " (latest)" if i == 1 else ""
         print(f"  {i:2}. {version}{marker}")
-    
+
     print()
     print(f"  0. Use default ({DEFAULT_GRADLE_VERSION})")
     print()
-    
+
     while True:
         try:
             choice = input("Enter number (0-15) or version string: ").strip()
-            
+
             # Direct version string
             if '.' in choice:
                 return choice
-            
+
             # Number selection
             num = int(choice)
             if num == 0:
                 return DEFAULT_GRADLE_VERSION
             if 1 <= num <= len(display_versions):
                 return display_versions[num - 1]
-            
+
             print_error(f"Invalid selection. Please enter 0-{len(display_versions)}")
-            
+
         except ValueError:
             print_error("Invalid input. Enter a number or version string")
         except KeyboardInterrupt:
             print()
             print_info(f"Using default: {DEFAULT_GRADLE_VERSION}")
             return DEFAULT_GRADLE_VERSION
+
+
+# ============================================================================
+# Verbose Command Execution
+# ============================================================================
+
+def run_command(cmd: list, cwd: Path = None, check: bool = True,
+                capture_output: bool = True, verbose: bool = True) -> subprocess.CompletedProcess:
+    """
+    Run command with optional verbose output.
+
+    Args:
+        cmd: Command as list of strings
+        cwd: Working directory
+        check: Raise on non-zero exit
+        capture_output: Capture stdout/stderr
+        verbose: Show command being executed
+
+    Returns:
+        CompletedProcess result
+    """
+    if verbose:
+        print_info(f"Executing: {' '.join(cmd)}")
+        if cwd:
+            print_info(f"Working directory: {cwd}")
+
+    return subprocess.run(
+        cmd,
+        cwd=str(cwd) if cwd else None,
+        check=check,
+        capture_output=capture_output,
+        text=True
+    )
 
 
 # ============================================================================
@@ -303,36 +336,36 @@ def print_warning(message: str):
 def parse_github_url(url: str) -> Optional[Tuple[str, Optional[str]]]:
     """
     Parse GitHub URL and extract clone URL and subdirectory.
-    
+
     Supports formats:
     - https://github.com/user/repo
     - https://github.com/user/repo.git
     - https://github.com/user/repo/tree/branch/subdir
     - github.com/user/repo/tree/branch/path/to/template
-    
+
     Args:
         url: GitHub URL
-        
+
     Returns:
         Tuple of (clone_url, subdir_path) or None if not a GitHub URL
-        
+
     Examples:
         >>> parse_github_url("https://github.com/stotz/gradleInitTemplates/tree/main/kotlin-single")
         ('https://github.com/stotz/gradleInitTemplates.git', 'kotlin-single')
-        
+
         >>> parse_github_url("https://github.com/stotz/gradleInitTemplates")
         ('https://github.com/stotz/gradleInitTemplates.git', None)
     """
     # Pattern: github.com/user/repo(/tree/branch/subdir)?
     pattern = r'(?:https?://)?github\.com/([^/]+)/([^/]+?)(?:\.git)?(?:/tree/[^/]+/(.+))?/?$'
     match = re.match(pattern, url)
-    
+
     if not match:
         return None
-    
+
     user, repo, subdir = match.groups()
     clone_url = f"https://github.com/{user}/{repo}.git"
-    
+
     return (clone_url, subdir if subdir else None)
 
 
@@ -674,9 +707,16 @@ class TemplateRepository:
         self.is_git = (path / '.git').exists()
 
     def clone(self) -> bool:
-        """Clone repository if not exists"""
+        """Clone repository if not exists or if empty"""
+        # Check if path exists and has content
         if self.path.exists():
-            return True
+            # Check if directory has any templates (subdirectories)
+            has_templates = any(item.is_dir() for item in self.path.iterdir()
+                                if not item.name.startswith('.'))
+            if has_templates:
+                return True
+            # Directory exists but is empty - remove and clone
+            shutil.rmtree(self.path)
 
         if not self.url:
             return False
@@ -686,39 +726,49 @@ class TemplateRepository:
         try:
             # Check if it's a GitHub tree URL (e.g., .../tree/main/subdir)
             github_info = parse_github_url(self.url)
-            
+
             if github_info:
                 clone_url, subdir = github_info
-                
-                # Clone to temporary directory
+
+                # If no subdirectory, clone directly to target
+                if not subdir:
+                    print_info(f"→ Cloning to: {self.path}")
+                    run_command(
+                        ['git', 'clone', '--depth', '1', clone_url, str(self.path)],
+                        verbose=True
+                    )
+
+                    # Remove .git directory to save space
+                    git_dir = self.path / '.git'
+                    if git_dir.exists():
+                        shutil.rmtree(git_dir, ignore_errors=True)
+
+                    print_success(f"Cloned {self.name} templates")
+                    return True
+
+                # Clone to temporary directory (only if subdir specified)
                 temp_dir = self.path.parent / f"{self.path.name}_temp"
                 if temp_dir.exists():
-                    shutil.rmtree(temp_dir)
-                
-                subprocess.run(
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+
+                print_info(f"→ Cloning to temp: {temp_dir}")
+                print_info(f"→ Extracting subdir: {subdir}")
+                run_command(
                     ['git', 'clone', '--depth', '1', clone_url, str(temp_dir)],
-                    check=True,
-                    capture_output=True,
-                    text=True
+                    verbose=True
                 )
-                
-                # If subdirectory specified, move just that subdir
-                if subdir:
-                    source = temp_dir / subdir
-                    if not source.exists():
-                        shutil.rmtree(temp_dir)
-                        print_error(f"Subdirectory '{subdir}' not found in repository")
-                        return False
-                    
-                    # Move subdirectory contents to target
-                    shutil.copytree(source, self.path)
-                    shutil.rmtree(temp_dir)
-                else:
-                    # Move entire repo to target (remove .git)
-                    shutil.copytree(temp_dir, self.path, 
-                                   ignore=shutil.ignore_patterns('.git'))
-                    shutil.rmtree(temp_dir)
-                
+
+                # Move subdirectory contents to target
+                source = temp_dir / subdir
+                if not source.exists():
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    print_error(f"Subdirectory '{subdir}' not found in repository")
+                    return False
+
+                # Move subdirectory contents to target
+                shutil.copytree(source, self.path)
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
                 print_success(f"Cloned {self.name} templates")
                 return True
             else:
@@ -731,7 +781,7 @@ class TemplateRepository:
                 )
                 print_success(f"Cloned {self.name} templates")
                 return True
-                
+
         except subprocess.CalledProcessError as e:
             print_error(f"Failed to clone: {e.stderr}")
             return False
@@ -842,9 +892,8 @@ class TemplateRepositoryManager:
     def ensure_official_templates(self) -> bool:
         """Ensure official templates are cloned"""
         official = self.repositories['official']
-        if not official.path.exists():
-            return official.clone()
-        return True
+        # clone() now handles checking if templates exist
+        return official.clone()
 
     def update_all(self) -> Dict[str, bool]:
         """Update all git-based repositories"""
@@ -871,52 +920,52 @@ class TemplateRepositoryManager:
     def find_template(self, template_spec: str) -> Optional[Path]:
         """
         Find template by name or URL across all repositories.
-        
+
         Args:
             template_spec: Template name, local path, or GitHub URL
-            
+
         Returns:
             Path to template directory or None
         """
         # 1. Check if it's a URL (GitHub or other git)
         if template_spec.startswith(('http://', 'https://', 'git@', 'github.com')):
             return self._handle_template_url(template_spec)
-        
+
         # 2. Check if it's a local path
         path = Path(template_spec)
         if path.exists() and path.is_dir():
             if (path / "TEMPLATE.md").exists():
                 return path.resolve()
-        
+
         # 3. Try official repository
         self.ensure_official_templates()
         if 'official' in self.repositories:
             tmpl_path = self.repositories['official'].get_template_path(template_spec)
             if tmpl_path:
                 return tmpl_path
-        
+
         # 4. Try custom repositories
         for repo in self.repositories.values():
             tmpl_path = repo.get_template_path(template_spec)
             if tmpl_path:
                 return tmpl_path
-        
+
         return None
-    
+
     def _handle_template_url(self, url: str) -> Optional[Path]:
         """Handle template from URL (GitHub or git)"""
         # Create cache directory name from URL hash
         cache_name = hashlib.md5(url.encode()).hexdigest()[:12]
         cache_dir = self.paths.cache_dir / cache_name
-        
+
         # If already cached, return it
         if cache_dir.exists() and (cache_dir / "TEMPLATE.md").exists():
             print_info("Using cached template")
             return cache_dir
-        
+
         # Download template
         print_info(f"Downloading template from {url}...")
-        
+
         temp_repo = TemplateRepository("temp", cache_dir, url)
         if temp_repo.clone():
             if (cache_dir / "TEMPLATE.md").exists():
@@ -925,7 +974,7 @@ class TemplateRepositoryManager:
                 print_error("Downloaded repository is not a valid template (missing TEMPLATE.md)")
                 shutil.rmtree(cache_dir, ignore_errors=True)
                 return None
-        
+
         return None
 
     def add_custom_repository(self, name: str, url: str) -> bool:
@@ -1380,7 +1429,7 @@ def setup_jinja2_environment(template_path: Path, context: Dict[str, Any] = None
                 else:
                     return default
             return value
-        
+
         env.globals['config'] = config
 
     return env
@@ -1643,7 +1692,7 @@ class ProjectGenerator:
         gradle_build = self.target_path / 'build.gradle.kts'
         if not gradle_build.exists():
             gradle_build = self.target_path / 'build.gradle'
-        
+
         if gradle_build.exists():
             self._generate_gradle_wrapper()
 
@@ -1699,50 +1748,50 @@ class ProjectGenerator:
     def _generate_gradle_wrapper(self):
         """
         Generate Gradle Wrapper using the reliable empty-file method.
-        
+
         This method:
         1. Creates empty build.gradle.kts and settings.gradle.kts
         2. Runs 'gradle wrapper' to generate wrapper files
         3. Deletes the empty placeholder files
         4. Lets the template system generate the real files
-        
+
         This avoids Constructor errors from incomplete/complex build files.
         """
-        
+
         # Check if wrapper already exists
         gradlew = self.target_path / ('gradlew.bat' if IS_WINDOWS else 'gradlew')
         if gradlew.exists():
             print_info("Gradle Wrapper already exists")
             return
-        
+
         build_file = self.target_path / 'build.gradle.kts'
         settings_file = self.target_path / 'settings.gradle.kts'
-        
+
         # Remember if files existed before (from templates)
         build_existed = build_file.exists()
         settings_existed = settings_file.exists()
-        
+
         # Save content if files existed
         build_content = build_file.read_text() if build_existed else None
         settings_content = settings_file.read_text() if settings_existed else None
-        
+
         try:
             # Get Gradle version from context (fallback to default)
             gradle_version = self.context.get('gradle_version', DEFAULT_GRADLE_VERSION)
-            
+
             # Step 1: Create empty placeholder files
             if not build_existed:
                 build_file.touch()
             else:
                 # Temporarily replace with empty file
                 build_file.write_text("")
-                
+
             if not settings_existed:
                 settings_file.touch()
             else:
                 # Temporarily replace with empty file
                 settings_file.write_text("")
-            
+
             # Step 1.5: Stop Gradle daemon to clear cached Kotlin DSL
             # This is CRITICAL to avoid Constructor errors from cached compilations
             try:
@@ -1753,12 +1802,12 @@ class ProjectGenerator:
                     subprocess.run(['gradle', '--stop'], capture_output=True, timeout=10)
             except Exception:
                 pass  # Ignore errors - daemon might not be running
-            
+
             # Step 2: Generate wrapper
             cmd_list = ['gradle', 'wrapper', '--gradle-version', gradle_version]
             print_info(f"Executing: {' '.join(cmd_list)}")
             print_info(f"Working directory: {self.target_path}")
-            
+
             # On Windows, use shell=True and string command to handle shims/wrappers
             if IS_WINDOWS:
                 cmd = ' '.join(cmd_list)
@@ -1778,30 +1827,30 @@ class ProjectGenerator:
                     text=True,
                     timeout=60
                 )
-            
+
             print_info(f"Process exit code: {result.returncode}")
-            
+
             # Show stdout if present
             if result.stdout and result.stdout.strip():
                 print_info("Standard output:")
                 for line in result.stdout.strip().split('\n'):
                     print(f"  {line}")
-            
+
             # Show stderr if present
             if result.stderr and result.stderr.strip():
                 print_info("Error output:")
                 for line in result.stderr.strip().split('\n'):
                     print(f"  {line}")
-            
+
             if result.returncode == 0:
                 print_success(f"Gradle Wrapper {gradle_version} generated")
-                
+
                 # Step 3: Restore original files or delete placeholders
                 if build_existed and build_content:
                     build_file.write_text(build_content)
                 elif not build_existed:
                     build_file.unlink()
-                    
+
                 if settings_existed and settings_content:
                     settings_file.write_text(settings_content)
                 elif not settings_existed:
@@ -1809,41 +1858,41 @@ class ProjectGenerator:
             else:
                 print_warning("Gradle wrapper generation failed")
                 print_info(f"You can run manually: gradle wrapper --gradle-version {gradle_version}")
-                
+
                 # Restore original files on failure
                 if build_existed and build_content:
                     build_file.write_text(build_content)
                 if settings_existed and settings_content:
                     settings_file.write_text(settings_content)
-                
+
         except FileNotFoundError as e:
             print_warning(f"Gradle not found in PATH: {e}")
             print_info("  Install Gradle: https://gradle.org/install/")
             gradle_version = self.context.get('gradle_version', DEFAULT_GRADLE_VERSION)
             print_info(f"  Or run manually: gradle wrapper --gradle-version {gradle_version}")
-            
+
             # Restore original files on error
             if build_existed and build_content:
                 build_file.write_text(build_content)
             if settings_existed and settings_content:
                 settings_file.write_text(settings_content)
-                
+
         except subprocess.TimeoutExpired:
             print_warning("Gradle wrapper generation timed out (60s)")
             gradle_version = self.context.get('gradle_version', DEFAULT_GRADLE_VERSION)
             print_info(f"  You can run manually: gradle wrapper --gradle-version {gradle_version}")
-            
+
             # Restore original files on error
             if build_existed and build_content:
                 build_file.write_text(build_content)
             if settings_existed and settings_content:
                 settings_file.write_text(settings_content)
-                
+
         except Exception as e:
             print_warning(f"Unexpected error: {e}")
             import traceback
             traceback.print_exc()
-            
+
             # Restore original files on error
             if build_existed and build_content:
                 build_file.write_text(build_content)
@@ -2080,7 +2129,7 @@ def handle_init_command(args: argparse.Namespace,
 
         # Handle Gradle version selection
         gradle_version = None
-        
+
         if args.select_gradle_version:
             # Interactive selection
             gradle_version = select_gradle_version_interactive()
@@ -2098,7 +2147,7 @@ def handle_init_command(args: argparse.Namespace,
         else:
             # Use default
             gradle_version = DEFAULT_GRADLE_VERSION
-        
+
         # Override CLI args with selected version
         args.gradle_version = gradle_version
         print_info(f"Using Gradle version: {gradle_version}")
@@ -2197,7 +2246,7 @@ def main():
     repo_manager = TemplateRepositoryManager(paths)
 
     # Phase 1: Parse to get basic args and check for module commands
-    parser = argparse.ArgumentParser(add_help=False)
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     parser.add_argument('--download-modules', action='store_true')
     parser.add_argument('--update-modules', action='store_true')
     parser.add_argument('--modules-info', action='store_true')
