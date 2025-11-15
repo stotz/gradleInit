@@ -1163,6 +1163,8 @@ class DynamicCLIBuilder:
         control_group.add_argument('--config', action='append',
                                    metavar='KEY=VALUE',
                                    help='Set configuration value (can be used multiple times)')
+        control_group.add_argument('--interactive', '-i', action='store_true',
+                                   help='Enable interactive mode for prompts')
         control_group.add_argument('--no-interactive', action='store_true',
                                    help='Disable interactive mode')
         control_group.add_argument('--dry-run', action='store_true',
@@ -2092,14 +2094,71 @@ def handle_init_command(args: argparse.Namespace,
 
     # Validate required arguments
     if not args.project_name:
-        print_error("Project name required")
-        print_info("Usage: gradleInit.py init PROJECT_NAME --template TEMPLATE")
-        return 1
+        if args.interactive:
+            # Interactive mode - prompt for project name
+            args.project_name = input("Project name: ").strip()
+            if not args.project_name:
+                print_error("Project name required")
+                return 1
+        else:
+            print_error("Project name required")
+            print_info("Usage: gradleInit.py init PROJECT_NAME --template TEMPLATE")
+            return 1
 
     if not args.template:
-        print_error("Template required. Use --template <n>")
-        print_info("Run: gradleInit.py templates --list")
-        return 1
+        if args.interactive:
+            # Show available templates
+            templates = repo_manager.list_all_templates()
+            if not templates:
+                print_error("No templates available")
+                print_info("Run: gradleInit.py templates --update")
+                return 1
+
+            print_info("Available templates:")
+            for i, tmpl in enumerate(templates, 1):
+                metadata = TemplateMetadata(Path(tmpl['path']))
+                print(f"  {i}. {tmpl['name']:20} - {metadata.get_description()}")
+
+            print()
+            choice = input(f"Select template (1-{len(templates)}): ").strip()
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(templates):
+                    args.template = templates[idx]['name']
+                else:
+                    print_error("Invalid selection")
+                    return 1
+            except ValueError:
+                # Try as template name
+                args.template = choice
+        else:
+            print_error("Template required. Use --template <name>")
+            print_info("Run: gradleInit.py templates --list")
+            return 1
+
+    # Interactive mode - prompt for missing values
+    if args.interactive:
+        if not args.group:
+            default_group = "com.example"
+            args.group = input(f"Group ID [{default_group}]: ").strip() or default_group
+
+        if not args.project_version:
+            default_version = "0.1.0"
+            args.project_version = input(f"Version [{default_version}]: ").strip() or default_version
+
+        if not args.gradle_version:
+            print()
+            print_info(f"Gradle version selection:")
+            print(f"  1. Use default ({DEFAULT_GRADLE_VERSION})")
+            print(f"  2. Select from list")
+            print(f"  3. Enter version manually")
+            choice = input("Choice [1]: ").strip() or "1"
+
+            if choice == "2":
+                args.gradle_version = select_gradle_version_interactive()
+            elif choice == "3":
+                args.gradle_version = input("Gradle version: ").strip()
+            # else: use default (will be set later)
 
     # Find template
     template_path = repo_manager.find_template(args.template)
