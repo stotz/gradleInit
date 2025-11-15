@@ -312,7 +312,7 @@ class TestTemplateGeneration(unittest.TestCase):
 
     def test_kotlin_single_gradle_build(self):
         """Test kotlin-single builds with Gradle"""
-        print(f"{'#' * 70}")
+        print(f"\n\n{'#' * 70}")
         print(f"  TEST: kotlin-single - Gradle Build")
         print(f"{'#' * 70}")
         project_path = self._generate_project('kotlin-single', 'build-kotlin-single')
@@ -330,7 +330,7 @@ class TestTemplateGeneration(unittest.TestCase):
 
     def test_kotlin_single_gradle_test(self):
         """Test kotlin-single runs tests"""
-        print(f"{'#' * 70}")
+        print(f"\n\n{'#' * 70}")
         print(f"  TEST: kotlin-single - Gradle Test")
         print(f"{'#' * 70}")
         project_path = self._generate_project('kotlin-single', 'test-kotlin-single-tests')
@@ -350,7 +350,7 @@ class TestTemplateGeneration(unittest.TestCase):
 
     def test_kotlin_multi_generation(self):
         """Test kotlin-multi template generation"""
-        print(f"{'#' * 70}")
+        print(f"\n\n{'#' * 70}")
         print(f"  TEST: kotlin-multi - Generation")
         print(f"{'#' * 70}")
         project_path = self._generate_project('kotlin-multi', 'test-kotlin-multi')
@@ -376,7 +376,7 @@ class TestTemplateGeneration(unittest.TestCase):
 
     def test_kotlin_multi_gradle_build(self):
         """Test kotlin-multi builds with Gradle"""
-        print(f"{'#' * 70}")
+        print(f"\n\n{'#' * 70}")
         print(f"  TEST: kotlin-multi - Gradle Build")
         print(f"{'#' * 70}")
         project_path = self._generate_project('kotlin-multi', 'build-kotlin-multi')
@@ -398,7 +398,7 @@ class TestTemplateGeneration(unittest.TestCase):
 
     def test_kotlin_multi_app_depends_on_lib(self):
         """Test app module can use lib module"""
-        print(f"{'#' * 70}")
+        print(f"\n\n{'#' * 70}")
         print(f"  TEST: kotlin-multi - Module Dependencies")
         print(f"{'#' * 70}")
         project_path = self._generate_project('kotlin-multi', 'deps-kotlin-multi')
@@ -420,7 +420,7 @@ class TestTemplateGeneration(unittest.TestCase):
 
     def test_springboot_generation(self):
         """Test springboot template generation"""
-        print(f"{'#' * 70}")
+        print(f"\n\n{'#' * 70}")
         print(f"  TEST: springboot - Generation")
         print(f"{'#' * 70}")
         project_path = self._generate_project(
@@ -443,7 +443,7 @@ class TestTemplateGeneration(unittest.TestCase):
 
     def test_springboot_gradle_build(self):
         """Test springboot builds with Gradle"""
-        print(f"{'#' * 70}")
+        print(f"\n\n{'#' * 70}")
         print(f"  TEST: springboot - Gradle Build")
         print(f"{'#' * 70}")
         project_path = self._generate_project(
@@ -467,7 +467,7 @@ class TestTemplateGeneration(unittest.TestCase):
 
     def test_ktor_generation(self):
         """Test ktor template generation"""
-        print(f"{'#' * 70}")
+        print(f"\n\n{'#' * 70}")
         print(f"  TEST: ktor - Generation")
         print(f"{'#' * 70}")
         project_path = self._generate_project(
@@ -493,7 +493,7 @@ class TestTemplateGeneration(unittest.TestCase):
 
     def test_ktor_gradle_build(self):
         """Test ktor builds with Gradle"""
-        print(f"{'#' * 70}")
+        print(f"\n\n{'#' * 70}")
         print(f"  TEST: ktor - Gradle Build")
         print(f"{'#' * 70}")
         project_path = self._generate_project(
