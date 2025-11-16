@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple, Any
 # Version & Constants
 # ============================================================================
 
-SCRIPT_VERSION = "1.3.16"
+SCRIPT_VERSION = "1.4.0"
 MODULES_REPO = "https://github.com/stotz/gradleInitModules.git"
 TEMPLATES_REPO = "https://github.com/stotz/gradleInitTemplates.git"
 MODULES_VERSION = "main"  # Use main branch (v1.3.0 tag doesn't exist yet)
@@ -2354,7 +2354,8 @@ def load_config(config_file: Path) -> Dict[str, Any]:
         return {}
 
     try:
-        return toml.loads(config_file.read_text())
+        config_text = config_file.read_text()
+        return toml.loads(config_text)
     except Exception as e:
         print_warning(f"Failed to load config: {e}")
         return {}
@@ -2491,40 +2492,149 @@ def handle_config_command(args: argparse.Namespace, paths: GradleInitPaths) -> i
     return 0
 
 
+# ============================================================================
+# Config & Validation Helpers
+# ============================================================================
+
+def get_config_default(config: Dict[str, Any], key: str, fallback: Any = None) -> Any:
+    """
+    Get default value from config with fallback
+    
+    Checks in order:
+    1. config['defaults'][key]
+    2. config['custom'][key]
+    3. fallback value
+    
+    Args:
+        config: Loaded configuration dictionary
+        key: Configuration key to look up
+        fallback: Fallback value if not found
+        
+    Returns:
+        Configuration value or fallback
+    """
+    # Check defaults section
+    if 'defaults' in config and key in config['defaults']:
+        return config['defaults'][key]
+    
+    # Check custom section
+    if 'custom' in config and key in config['custom']:
+        return config['custom'][key]
+    
+    # Return fallback
+    return fallback
+
+
+def validate_value_against_hint(value: str, hint: 'TemplateVariable') -> Tuple[bool, Optional[str]]:
+    """
+    Validate a value against a template hint's regex pattern
+    
+    Args:
+        value: Value to validate
+        hint: TemplateVariable with regex_pattern
+        
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    if not hint.regex_pattern:
+        return True, None
+    
+    try:
+        if not re.match(f"^{hint.regex_pattern}$", str(value)):
+            error_msg = f"Value '{value}' does not match pattern: {hint.regex_pattern}"
+            if hint.help_text:
+                error_msg += f"\n  Help: {hint.help_text}"
+            return False, error_msg
+    except re.error as e:
+        # Invalid regex pattern in template
+        print_warning(f"Invalid regex pattern in template: {e}")
+        return True, None
+    
+    return True, None
+
+
+def prompt_with_validation(prompt_text: str, 
+                          default: Any, 
+                          hint: Optional['TemplateVariable'] = None,
+                          allow_empty: bool = True,
+                          source: str = None) -> str:
+    """
+    Prompt user for input with validation and re-prompting on error
+    
+    Args:
+        prompt_text: Text to display to user
+        default: Default value if user enters nothing
+        hint: Optional TemplateVariable for validation
+        allow_empty: Allow empty input (uses default)
+        source: Optional source description for default value (e.g., "from config")
+        
+    Returns:
+        Validated user input or default
+    """
+    while True:
+        # Show prompt with default
+        if default is not None:
+            full_prompt = f"{prompt_text} [{default}]: "
+        else:
+            full_prompt = f"{prompt_text}: "
+        
+        user_input = input(full_prompt).strip()
+        
+        # Handle empty input
+        if not user_input:
+            if allow_empty and default is not None:
+                return str(default)
+            elif not allow_empty:
+                print_error("Value required")
+                continue
+            else:
+                return user_input
+        
+        # Validate against hint if provided
+        if hint:
+            is_valid, error_msg = validate_value_against_hint(user_input, hint)
+            if not is_valid:
+                print_error(error_msg)
+                if hint.default:
+                    print_info(f"Press Enter to use default: {hint.default}")
+                continue
+        
+        return user_input
+
+
+def validate_cli_args_against_template(args: Dict[str, Any], 
+                                       hints: List['TemplateVariable']) -> Tuple[bool, List[str]]:
+    """
+    Validate CLI arguments against template hints
+    
+    Args:
+        args: Dictionary of CLI arguments
+        hints: List of TemplateVariable hints from template
+        
+    Returns:
+        Tuple of (all_valid, list_of_errors)
+    """
+    errors = []
+    
+    for hint in hints:
+        # Get value from args using context_key
+        value = args.get(hint.context_key)
+        
+        if value is None:
+            continue
+        
+        # Validate against regex
+        is_valid, error_msg = validate_value_against_hint(value, hint)
+        if not is_valid:
+            errors.append(f"Argument '--{hint.context_key}': {error_msg}")
+    
+    return len(errors) == 0, errors
+
+
 def handle_init_command(args: argparse.Namespace,
                         paths: GradleInitPaths,
                         repo_manager: TemplateRepositoryManager) -> int:
     """Handle init command - Create project from template"""
-
-    if args.help:
-        print_header("Init Command Help")
-        print("Create a new project from a template")
-        print()
-        print("Usage:")
-        print("  gradleInit.py init PROJECT_NAME --template TEMPLATE [OPTIONS]")
-        print()
-        print("Required Arguments:")
-        print("  PROJECT_NAME              Name of the project to create")
-        print("  --template TEMPLATE       Template to use (name or URL)")
-        print()
-        print("Optional Arguments:")
-        print("  --group GROUP             Maven group ID (e.g., com.example)")
-        print("  --version VERSION         Project version (e.g., 0.1.0)")
-        print("  --config KEY=VALUE        Set template configuration")
-        print()
-        print("Examples:")
-        print("  # Simple project")
-        print("  gradleInit.py init my-app --template kotlin-single")
-        print()
-        print("  # With custom group")
-        print("  gradleInit.py init my-app --template kotlin-single --group com.mycompany")
-        print()
-        print("  # Spring Boot with config")
-        print("  gradleInit.py init my-api --template springboot \\")
-        print("    --config spring.modules=web,data-jpa \\")
-        print("    --config database.driver=postgresql")
-        print()
-        return 0
 
     # Validate required arguments
     if not args.project_name:
@@ -2570,16 +2680,86 @@ def handle_init_command(args: argparse.Namespace,
             print_info("Run: gradleInit.py templates --list")
             return 1
 
-    # Interactive mode - prompt for missing values
+    # Load config BEFORE interactive prompts so we can use config defaults
+    config = load_config(paths.config_file)
+    
+    # Find and load template early if provided (needed for template-aware help and validation)
+    template_path = None
+    metadata = None
+    if args.template:
+        template_path = repo_manager.find_template(args.template)
+        if template_path:
+            metadata = TemplateMetadata(template_path)
+    
+    # Template-aware help
+    if args.help:
+        print_header("Init Command Help")
+        print("Create a new project from a template")
+        print()
+        print("Usage:")
+        print("  gradleInit.py init PROJECT_NAME --template TEMPLATE [OPTIONS]")
+        print()
+        print("Required Arguments:")
+        print("  PROJECT_NAME              Name of the project to create")
+        print("  --template TEMPLATE       Template to use (name or URL)")
+        print()
+        print("Optional Arguments:")
+        print("  --group GROUP             Maven group ID (e.g., com.example)")
+        print("  --version VERSION         Project version (e.g., 0.1.0)")
+        print("  --config KEY=VALUE        Set template configuration")
+        print()
+        
+        # Show template-specific variables if template is loaded
+        if metadata:
+            hints = metadata.get_template_hints()
+            if hints:
+                print("Template Variables:")
+                for hint in sorted(hints, key=lambda h: h.sort_order):
+                    required = " (required)" if hint.required else " (optional)"
+                    print(f"  --{hint.context_key:20} {hint.help_text}{required}")
+                    if hint.regex_pattern:
+                        print(f"                           Pattern: {hint.regex_pattern}")
+                    if hint.default:
+                        print(f"                           Default: {hint.default}")
+                print()
+        
+        print("Examples:")
+        print("  # Simple project")
+        print("  gradleInit.py init my-app --template kotlin-single")
+        print()
+        print("  # With custom group")
+        print("  gradleInit.py init my-app --template kotlin-single --group com.mycompany")
+        print()
+        print("  # Spring Boot with config")
+        print("  gradleInit.py init my-api --template springboot \\")
+        print("    --config spring.modules=web,data-jpa \\")
+        print("    --config database.driver=postgresql")
+        print()
+        return 0
+
+    # Interactive mode - prompt for missing values with config-aware defaults
     if args.interactive:
+        # Get hints for validation if template is loaded
+        hints_map = {}
+        if metadata:
+            for hint in metadata.get_template_hints():
+                hints_map[hint.context_key] = hint
+        
+        # Prompt for group with config default
         if not args.group:
-            default_group = "com.example"
-            args.group = input(f"Group ID [{default_group}]: ").strip() or default_group
+            default_group = get_config_default(config, 'group', 'com.example')
+            hint = hints_map.get('group')
+            source = "from config" if ('defaults' in config and 'group' in config['defaults']) else "fallback"
+            args.group = prompt_with_validation("Group ID", default_group, hint, source=source)
 
+        # Prompt for version with config default
         if not args.project_version:
-            default_version = "0.1.0"
-            args.project_version = input(f"Version [{default_version}]: ").strip() or default_version
+            default_version = get_config_default(config, 'version', '0.1.0')
+            hint = hints_map.get('version')
+            source = "from config" if ('defaults' in config and 'version' in config['defaults']) else "fallback"
+            args.project_version = prompt_with_validation("Version", default_version, hint, source=source)
 
+        # Prompt for gradle_version if not set
         if not args.gradle_version:
             print()
             print_info(f"Gradle version selection:")
@@ -2591,16 +2771,58 @@ def handle_init_command(args: argparse.Namespace,
             if choice == "2":
                 args.gradle_version = select_gradle_version_interactive()
             elif choice == "3":
-                args.gradle_version = input("Gradle version: ").strip()
+                default_gradle = get_config_default(config, 'gradle_version', DEFAULT_GRADLE_VERSION)
+                args.gradle_version = input(f"Gradle version [{default_gradle}]: ").strip() or default_gradle
             # else: use default (will be set later)
+        
+        # Prompt for any other template-specific variables with hints
+        if metadata:
+            for hint in sorted(hints_map.values(), key=lambda h: h.sort_order):
+                # Skip already handled variables
+                if hint.context_key in ['group', 'version', 'project_name', 'gradle_version', 'kotlin_version']:
+                    continue
+                
+                # Check if CLI arg exists for this hint
+                cli_value = getattr(args, hint.context_key, None)
+                if cli_value is None:
+                    # Get default from config or hint
+                    default_value = get_config_default(config, hint.context_key, hint.default)
+                    if default_value is not None or hint.required:
+                        prompted_value = prompt_with_validation(
+                            hint.help_text or hint.context_key,
+                            default_value,
+                            hint,
+                            allow_empty=not hint.required
+                        )
+                        setattr(args, hint.context_key, prompted_value if prompted_value else default_value)
 
-    # Find template
-    template_path = repo_manager.find_template(args.template)
+    # Find template if not already loaded
+    if not template_path:
+        template_path = repo_manager.find_template(args.template)
 
     if not template_path:
         print_error(f"Template not found: {args.template}")
         print_info("Run: gradleInit.py templates --list")
         return 1
+
+    # Load template metadata if not already loaded
+    if not metadata:
+        metadata = TemplateMetadata(template_path)
+    
+    # CLI Validation - validate all CLI args against template hints
+    if not args.interactive:
+        # Only validate in non-interactive mode (interactive mode validates during prompts)
+        hints = metadata.get_template_hints()
+        if hints:
+            cli_args_dict = vars(args)
+            is_valid, errors = validate_cli_args_against_template(cli_args_dict, hints)
+            if not is_valid:
+                print_error("Validation errors:")
+                for error in errors:
+                    print(f"  - {error}")
+                print()
+                print_info("Run with --help to see valid values")
+                return 1
 
     # Display project info
     print_header(f"Creating Project: {args.project_name}")
@@ -2609,9 +2831,6 @@ def handle_init_command(args: argparse.Namespace,
     print()
 
     try:
-        # Load template metadata
-        metadata = TemplateMetadata(template_path)
-
         # Validate requirements
         requirements = metadata.get_requirements()
         if requirements:
@@ -2633,13 +2852,13 @@ def handle_init_command(args: argparse.Namespace,
                 gradle_version = get_latest_gradle_version()
                 if not gradle_version:
                     print_warning("Could not fetch latest version")
-                    gradle_version = DEFAULT_GRADLE_VERSION
+                    gradle_version = get_config_default(config, 'gradle_version', DEFAULT_GRADLE_VERSION)
                 print_success(f"Latest Gradle version: {gradle_version}")
             else:
                 gradle_version = args.gradle_version
         else:
-            # Use default
-            gradle_version = DEFAULT_GRADLE_VERSION
+            # Use config default or hardcoded default
+            gradle_version = get_config_default(config, 'gradle_version', DEFAULT_GRADLE_VERSION)
 
         # Override CLI args with selected version
         args.gradle_version = gradle_version
@@ -2647,7 +2866,7 @@ def handle_init_command(args: argparse.Namespace,
         print()
 
         # Build rendering context
-        config = load_config(paths.config_file)
+        # Config already loaded earlier
         
         # Prepare CLI args dict and map project_version to version
         cli_args_dict = vars(args)
