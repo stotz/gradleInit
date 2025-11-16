@@ -1148,12 +1148,256 @@ class TemplateArgument:
     required: bool = False
 
 
+@dataclass
+class TemplateVariable:
+    """Template variable with metadata extracted from inline hints"""
+    name: str                    # Variable name (e.g., "group")
+    help_text: str              # Help text from hint
+    sort_order: int             # Sort order for menu (default: 999)
+    regex_pattern: Optional[str] = None  # Validation regex (e.g., "11|17|21")
+    default_value: Optional[str] = None  # Default value
+    locations: List[Tuple[Path, int]] = field(default_factory=list)  # [(file, line_number), ...]
+    is_enhanced: bool = False   # True if has hint, False if plain {{ var }}
+    
+    def validate(self, value: str) -> Tuple[bool, str]:
+        """
+        Validate value against regex pattern
+        
+        Args:
+            value: Value to validate
+        
+        Returns:
+            (is_valid, error_message)
+        """
+        if not self.regex_pattern:
+            return True, ""
+        
+        try:
+            pattern = re.compile(f"^{self.regex_pattern}$")
+            if pattern.match(str(value)):
+                return True, ""
+            else:
+                return False, f"Value '{value}' does not match pattern: {self.regex_pattern}"
+        except re.error as e:
+            return False, f"Invalid regex pattern: {e}"
+
+
+class TemplateHintParser:
+    """
+    Parse template files for variables with inline hints
+    
+    Supports two formats:
+    1. Plain: {{ variable_name }}
+    2. Enhanced: {{ @@[sort]|(regex)|[help_text]=[default]@@variable_name }}
+    
+    Enhanced format:
+    - @@ markers delimit the hint
+    - Optional sort order (e.g., 01|) for menu ordering
+    - Optional regex pattern (e.g., |(11|17|21)|) for validation
+    - Help text is shown in --help and interactive menu
+    - Optional default value after = in help text
+    - Variable name follows the second @@
+    - | is used as separator (better than : for Windows paths, URLs, etc.)
+    
+    Examples:
+        {{ @@01|Maven group ID (e.g. com.company)=com.example@@group }}
+        {{ @@03|(11|17|21)|JDK version=21@@jdk_version }}
+        {{ @@(h2|postgres|mysql)|Database type=h2@@db_type }}
+        {{ @@04|(c:\\user|c:\\home)|Install Dir=c:\\home@@install_dir }}
+        {{ @@02|Application version@@version }}
+        {{ project_name }}
+        
+    Compiles to:
+        {{ group }}, {{ jdk_version }}, {{ db_type }}, {{ install_dir }}, {{ version }}, {{ project_name }}
+    """
+    
+    # Regex patterns
+    ENHANCED_PATTERN = re.compile(
+        r'\{\{\s*@@'                                # {{ @@
+        r'(?:(\d+)\|)?'                             # Optional sort: 01|
+        r'(?:\(([^)]+)\)\|)?'                       # Optional regex: (pattern)|
+        r'([^@]+?)'                                 # Help text (non-greedy)
+        r'@@'                                       # @@
+        r'([a-zA-Z_][a-zA-Z0-9_]*)'                # Variable name
+        r'\s*\}\}'                                  # }}
+    )
+    
+    PLAIN_PATTERN = re.compile(
+        r'\{\{\s*'                      # {{
+        r'([a-zA-Z_][a-zA-Z0-9_]*)'    # Variable name
+        r'\s*\}\}'                      # }}
+    )
+    
+    def __init__(self, template_dir: Path):
+        self.template_dir = template_dir
+        self.variables: Dict[str, TemplateVariable] = {}
+    
+    def parse_templates(self) -> Dict[str, TemplateVariable]:
+        """
+        Parse all template files and extract variables
+        
+        Returns:
+            Dict mapping variable name to TemplateVariable
+        """
+        # Find all template files
+        template_files = self._find_template_files()
+        
+        # Parse each file
+        for file_path in template_files:
+            self._parse_file(file_path)
+        
+        return self.variables
+    
+    def _find_template_files(self) -> List[Path]:
+        """Find all files that could contain Jinja2 templates"""
+        extensions = [
+            '.gradle.kts', '.gradle', '.kt', '.kts', 
+            '.properties', '.yml', '.yaml', '.xml',
+            '.toml', '.json', '.md', '.txt', '.sh'
+        ]
+        
+        files = []
+        for ext in extensions:
+            files.extend(self.template_dir.rglob(f'*{ext}'))
+        
+        # Exclude certain directories
+        exclude_dirs = {'.git', 'build', 'gradle', '.gradle'}
+        files = [
+            f for f in files 
+            if not any(ex in f.parts for ex in exclude_dirs)
+        ]
+        
+        return files
+    
+    def _parse_file(self, file_path: Path):
+        """Parse a single file for template variables"""
+        try:
+            content = file_path.read_text(encoding='utf-8')
+        except (UnicodeDecodeError, PermissionError):
+            return
+        
+        lines = content.split('\n')
+        
+        for line_num, line in enumerate(lines, 1):
+            # Try enhanced pattern first
+            for match in self.ENHANCED_PATTERN.finditer(line):
+                sort_str, regex_pattern, help_and_default, var_name = match.groups()
+                sort_order = int(sort_str) if sort_str else 999
+                
+                # Extract help text and default value
+                help_text = help_and_default.strip()
+                default_value = None
+                
+                if '=' in help_text:
+                    parts = help_text.rsplit('=', 1)  # Split from right to handle = in help text
+                    help_text = parts[0].strip()
+                    default_value = parts[1].strip() if len(parts) > 1 else None
+                
+                self._add_variable(
+                    var_name=var_name,
+                    help_text=help_text,
+                    sort_order=sort_order,
+                    regex_pattern=regex_pattern,
+                    default_value=default_value,
+                    file_path=file_path,
+                    line_number=line_num,
+                    is_enhanced=True
+                )
+            
+            # Then check for plain variables (only if not already found as enhanced)
+            for match in self.PLAIN_PATTERN.finditer(line):
+                var_name = match.group(1)
+                
+                # Skip if already found as enhanced in this line
+                if var_name not in self.variables or not self.variables[var_name].is_enhanced:
+                    self._add_variable(
+                        var_name=var_name,
+                        help_text="",
+                        sort_order=999,
+                        regex_pattern=None,
+                        default_value=None,
+                        file_path=file_path,
+                        line_number=line_num,
+                        is_enhanced=False
+                    )
+    
+    def _add_variable(self, var_name: str, help_text: str, sort_order: int,
+                     regex_pattern: Optional[str], default_value: Optional[str],
+                     file_path: Path, line_number: int, is_enhanced: bool):
+        """Add or update a variable"""
+        if var_name in self.variables:
+            var = self.variables[var_name]
+            var.locations.append((file_path, line_number))
+            
+            # If we found an enhanced version, upgrade plain to enhanced
+            if is_enhanced and not var.is_enhanced:
+                var.help_text = help_text
+                var.sort_order = sort_order
+                var.regex_pattern = regex_pattern
+                var.default_value = default_value
+                var.is_enhanced = True
+        else:
+            self.variables[var_name] = TemplateVariable(
+                name=var_name,
+                help_text=help_text,
+                sort_order=sort_order,
+                regex_pattern=regex_pattern,
+                default_value=default_value,
+                locations=[(file_path, line_number)],
+                is_enhanced=is_enhanced
+            )
+    
+    def get_sorted_variables(self) -> List[TemplateVariable]:
+        """Get variables sorted by sort_order, then name"""
+        return sorted(
+            self.variables.values(),
+            key=lambda v: (v.sort_order, v.name)
+        )
+    
+    def compile_template(self, file_path: Path) -> str:
+        """
+        Compile template file by removing hints
+        
+        Converts:
+          {{ @@01|(11|17|21)|Help text=default@@variable }}
+        To:
+          {{ variable }}
+        
+        Returns:
+            Compiled template content
+        """
+        try:
+            content = file_path.read_text(encoding='utf-8')
+        except (UnicodeDecodeError, PermissionError):
+            return ""
+        
+        # Replace enhanced patterns with plain variables
+        def replace_enhanced(match):
+            _, _, _, var_name = match.groups()  # sort, regex, help, varname
+            return '{{ ' + var_name + ' }}'
+        
+        compiled = self.ENHANCED_PATTERN.sub(replace_enhanced, content)
+        return compiled
+
+
 class TemplateMetadata:
-    """Parse and manage template metadata from TEMPLATE.md"""
+    """
+    Parse and manage template metadata
+    
+    Supports two sources:
+    1. TEMPLATE.md YAML frontmatter (legacy)
+    2. Inline hints in template files (new)
+    
+    Inline hints take precedence for discovered variables.
+    """
 
     def __init__(self, template_path: Path):
         self.template_path = template_path
         self.metadata = self._parse_metadata()
+        
+        # Parse inline hints from template files
+        self.hint_parser = TemplateHintParser(template_path)
+        self.hint_variables = self.hint_parser.parse_templates()
 
     def _parse_metadata(self) -> Dict[str, Any]:
         """Parse YAML frontmatter from TEMPLATE.md"""
@@ -1196,26 +1440,48 @@ class TemplateMetadata:
         return result
 
     def get_arguments(self) -> List[TemplateArgument]:
-        """Get template-specific arguments"""
-        args_data = self.metadata.get('arguments', [])
-
-        if not args_data:
-            return []
-
+        """
+        Get template-specific arguments
+        
+        Combines:
+        1. Arguments from TEMPLATE.md (legacy)
+        2. Variables from inline hints (new)
+        
+        Inline hints take precedence.
+        """
         arguments = []
+        seen_names = set()
+        
+        # First, add variables from inline hints
+        for var in self.hint_parser.get_sorted_variables():
+            arguments.append(TemplateArgument(
+                name=var.name,
+                type='string',
+                help=var.help_text if var.is_enhanced else f"Set {var.name}",
+                context_key=var.name,
+                default=var.default_value,  # Use default from hint
+                choices=None,
+                required=False
+            ))
+            seen_names.add(var.name)
+        
+        # Then add from TEMPLATE.md (if not already added)
+        args_data = self.metadata.get('arguments', [])
         for arg_data in args_data:
             if not isinstance(arg_data, dict):
                 continue
-
-            arguments.append(TemplateArgument(
-                name=arg_data.get('name', ''),
-                type=arg_data.get('type', 'string'),
-                help=arg_data.get('help', ''),
-                context_key=arg_data.get('context_key', arg_data.get('name', '').replace('-', '_')),
-                default=arg_data.get('default'),
-                choices=arg_data.get('choices'),
-                required=arg_data.get('required', False)
-            ))
+            
+            name = arg_data.get('name', '')
+            if name and name not in seen_names:
+                arguments.append(TemplateArgument(
+                    name=name,
+                    type=arg_data.get('type', 'string'),
+                    help=arg_data.get('help', ''),
+                    context_key=arg_data.get('context_key', name.replace('-', '_')),
+                    default=arg_data.get('default'),
+                    choices=arg_data.get('choices'),
+                    required=arg_data.get('required', False)
+                ))
 
         return arguments
 
@@ -1237,6 +1503,18 @@ class TemplateMetadata:
     def get_requirements(self) -> Dict[str, str]:
         """Get template requirements"""
         return self.metadata.get('requirements', {})
+    
+    def get_hint_variables(self) -> Dict[str, TemplateVariable]:
+        """Get variables discovered from inline hints"""
+        return self.hint_variables
+    
+    def compile_template_file(self, file_path: Path) -> str:
+        """
+        Compile a template file by removing inline hints
+        
+        Returns compiled content ready for Jinja2
+        """
+        return self.hint_parser.compile_template(file_path)
 
 
 # ============================================================================
@@ -1648,7 +1926,8 @@ class ProjectGenerator:
     def __init__(self,
                  template_path: Path,
                  context: Dict[str, Any],
-                 target_path: Path):
+                 target_path: Path,
+                 template_metadata: Optional['TemplateMetadata'] = None):
         """
         Initialize project generator
 
@@ -1656,10 +1935,12 @@ class ProjectGenerator:
             template_path: Path to template directory
             context: Rendering context
             target_path: Where to create the project
+            template_metadata: Optional template metadata for hint compilation
         """
         self.template_path = template_path
         self.context = context
         self.target_path = target_path
+        self.template_metadata = template_metadata
         self.jinja_env = setup_jinja2_environment(template_path, context)
 
     def generate(self) -> bool:
@@ -1747,6 +2028,9 @@ class ProjectGenerator:
     def _render_text_file(self, source_file: Path, target_file: Path):
         """
         Render text file with Jinja2
+        
+        If template_metadata is available, compiles the template first
+        to remove inline hints before Jinja2 rendering.
 
         Args:
             source_file: Source template file
@@ -1756,12 +2040,19 @@ class ProjectGenerator:
             # Get template relative path
             rel_path = source_file.relative_to(self.template_path)
 
-            # Convert to forward slashes for Jinja2 (cross-platform)
-            template_name = str(rel_path).replace('\\', '/')
-
-            # Load and render template
-            template = self.jinja_env.get_template(template_name)
-            content = template.render(**self.context)
+            # Compile template if metadata available (removes inline hints)
+            if self.template_metadata:
+                compiled_content = self.template_metadata.compile_template_file(source_file)
+                # Render directly from string
+                template = self.jinja_env.from_string(compiled_content)
+                content = template.render(**self.context)
+            else:
+                # Legacy: direct template rendering
+                # Convert to forward slashes for Jinja2 (cross-platform)
+                template_name = str(rel_path).replace('\\', '/')
+                # Load and render template
+                template = self.jinja_env.get_template(template_name)
+                content = template.render(**self.context)
 
             # Write rendered content
             target_file.write_text(content, encoding='utf-8')
@@ -2384,7 +2675,8 @@ def handle_init_command(args: argparse.Namespace,
         generator = ProjectGenerator(
             template_path=template_path,
             context=context,
-            target_path=target_path
+            target_path=target_path,
+            template_metadata=metadata  # Pass metadata for hint compilation
         )
 
         # Execute generation
