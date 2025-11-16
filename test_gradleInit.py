@@ -134,25 +134,25 @@ class TestTemplateGeneration(unittest.TestCase):
         if result.returncode != 0:
             raise RuntimeError(f"Failed to clone templates: {result.stderr}")
 
-        print(f"✓ Templates cloned to {cls.templates_dir}")
+        print(f"[OK] Templates cloned to {cls.templates_dir}")
 
         # Verify we got the fixed templates
         settings_file = cls.templates_dir / "kotlin-single" / "settings.gradle.kts"
         if settings_file.exists():
             content = settings_file.read_text()
             if "pluginManagement" in content and "layout.projectDirectory.file" in content:
-                print("✓ Verified: Templates contain latest fixes")
+                print("[OK] Verified: Templates contain latest fixes")
             else:
-                print("⚠ Warning: Templates may not have latest fixes!")
+                print("[WARN] Warning: Templates may not have latest fixes!")
                 print(f"  First 200 chars: {content[:200]}")
         else:
-            print(f"⚠ Warning: settings.gradle.kts not found at {settings_file}")
+            print(f"[WARN] Warning: settings.gradle.kts not found at {settings_file}")
 
     @classmethod
     def tearDownClass(cls):
         """Cleanup after all tests"""
         # Keep test files for debugging on failure
-        print(f"\n→ Test files kept at: {cls.test_root}")
+        print(f"\n-> Test files kept at: {cls.test_root}")
         print("  To cleanup manually: rm -rf /c/tmp/gradleInit_test_*")
         # if cls.test_root.exists():
         #     shutil.rmtree(cls.test_root, ignore_errors=True)
@@ -170,14 +170,14 @@ class TestTemplateGeneration(unittest.TestCase):
             Path to generated project
         """
         print(f"\n{'=' * 70}")
-        print(f"  GENERATING: {template_name} → {project_name}")
+        print(f"  GENERATING: {template_name} -> {project_name}")
         print(f"{'=' * 70}")
 
         template_path = self.templates_dir / template_name
         self.assertTrue(template_path.exists(), f"Template not found: {template_name}")
 
         project_path = self.projects_dir / project_name
-        print(f"→ Target: {project_path}")
+        print(f"-> Target: {project_path}")
 
         if project_path.exists():
             shutil.rmtree(project_path)
@@ -199,25 +199,25 @@ class TestTemplateGeneration(unittest.TestCase):
         success = generator.generate()
 
         if not success:
-            print(f"\n{'✗' * 70}")
-            print(f"  GENERATION FAILED: {template_name} → {project_name}")
-            print(f"{'✗' * 70}")
+            print(f"\n{'[ERROR]' * 70}")
+            print(f"  GENERATION FAILED: {template_name} -> {project_name}")
+            print(f"{'[ERROR]' * 70}")
             print(f"  Template: {template_path}")
             print(f"  Target: {project_path}")
 
             # Show generated settings.gradle.kts if it exists
             settings_file = project_path / "settings.gradle.kts"
             if settings_file.exists():
-                print(f"\n→ Generated settings.gradle.kts:")
+                print(f"\n-> Generated settings.gradle.kts:")
                 print(settings_file.read_text()[:500])
 
             # Show template settings.gradle.kts
             template_settings = template_path / "settings.gradle.kts"
             if template_settings.exists():
-                print(f"\n→ Template settings.gradle.kts:")
+                print(f"\n-> Template settings.gradle.kts:")
                 print(template_settings.read_text()[:500])
         else:
-            print(f"✓ Project generated successfully")
+            print(f"[OK] Project generated successfully")
 
         self.assertTrue(success, f"Failed to generate project {project_name}")
         self.assertTrue(project_path.exists(), f"Project directory not created: {project_path}")
@@ -236,10 +236,10 @@ class TestTemplateGeneration(unittest.TestCase):
         Returns:
             CompletedProcess result
         """
-        print(f"\n{'─' * 70}")
+        print(f"\n{'-' * 70}")
         print(f"  RUNNING GRADLE: {' '.join(tasks)}")
-        print(f"{'─' * 70}")
-        print(f"→ Project: {project_path}")
+        print(f"{'-' * 70}")
+        print(f"-> Project: {project_path}")
 
         # Determine gradle wrapper command
         if os.name == 'nt':  # Windows
@@ -255,7 +255,7 @@ class TestTemplateGeneration(unittest.TestCase):
 
         cmd = [gradle_cmd, *tasks, '--no-daemon', '--console=plain']
 
-        print(f"→ Command: {' '.join(cmd)}")
+        print(f"-> Command: {' '.join(cmd)}")
 
         result = subprocess.run(
             cmd,
@@ -266,16 +266,16 @@ class TestTemplateGeneration(unittest.TestCase):
         )
 
         if result.returncode != 0:
-            print(f"\n{'✗' * 70}")
+            print(f"\n{'[ERROR]' * 70}")
             print(f"  GRADLE BUILD FAILED (exit code {result.returncode})")
-            print(f"{'✗' * 70}")
+            print(f"{'[ERROR]' * 70}")
             print(f"\n--- STDOUT ---")
             print(result.stdout)
             print(f"\n--- STDERR ---")
             print(result.stderr)
-            print(f"{'✗' * 70}\n")
+            print(f"{'[ERROR]' * 70}\n")
         else:
-            print(f"✓ Gradle build succeeded")
+            print(f"[OK] Gradle build succeeded")
 
         return result
 
@@ -640,9 +640,9 @@ if __name__ == '__main__':
     print()
     print("=" * 70)
     if success:
-        print("  ✓ All tests passed!")
+        print("  [OK] All tests passed!")
     else:
-        print("  ✗ Some tests failed")
+        print("  [ERROR] Some tests failed")
     print("=" * 70)
 
     sys.exit(0 if success else 1)
