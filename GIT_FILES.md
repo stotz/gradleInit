@@ -106,40 +106,78 @@ $ git ls-files | wc -l
 
 ## Standard .gitignore Content
 
-gradleInit templates include this `.gitignore`:
+gradleInit templates include this comprehensive `.gitignore`:
 
 ```gitignore
+#######################################
+# Core: Kotlin / Java / Gradle / IntelliJ
+#######################################
 # Gradle
 .gradle/
 build/
 !gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+gradle-app.setting
 
-# Compiled
-*.class
-
-# IDE
+# IntelliJ IDEA / JetBrains IDEs
 .idea/
-*.iml
 *.iws
+*.iml
 *.ipr
-.vscode/
-.project
-.classpath
-.settings/
+out/
+!**/src/main/**/out/
+!**/src/test/**/out/
 
-# OS
-.DS_Store
-Thumbs.db
+# Java / Kotlin compiled artifacts
+*.class
+*.jar
+*.war
+*.ear
+*.ktclass
 
-# Logs
+# JVM error dumps
+hs_err_pid*
+replay_pid*
+
+# Logs (generic)
 *.log
 
-# Temp
-*.swp
-*~
+# OS-specific noise
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+__MACOSX/
+
+# Windows
+Thumbs.db
+desktop.ini
+
+#######################################
+# OPTIONAL EXTENSIONS (commented out)
+# Uncomment sections as needed.
+#######################################
+##### Eclipse #####
+# .apt_generated
+# .classpath
+# ...
+
+##### VS Code #####
+# .vscode/
+
+##### Maven #####
+# target/
+# ...
 ```
 
-**Note:** The `!gradle/wrapper/gradle-wrapper.jar` line ensures the wrapper JAR IS committed despite `*.jar` being ignored elsewhere.
+**Key Features:**
+- ✅ **Gradle wrapper JAR included** (`!gradle/wrapper/gradle-wrapper.jar`)
+- ✅ **Allows build folders in src** for special cases
+- ✅ **JVM crash dumps** ignored (`hs_err_pid*`, `replay_pid*`)
+- ✅ **Cross-platform** (macOS, Windows, Linux)
+- ✅ **Optional sections** for Eclipse, VS Code, Maven, etc.
+- ✅ **Well-documented** with clear sections
 
 ## Pushing to GitHub
 
@@ -164,9 +202,52 @@ git diff --cached  # Should be empty if already committed
 
 # 2. Connect and push
 cd my-project
+
+# Using HTTPS (easier, requires username/password or token)
 git remote add origin https://github.com/USERNAME/my-project.git
 git branch -M main
 git push -u origin main
+
+# OR using SSH (recommended, requires SSH key setup)
+git remote add origin git@github.com:USERNAME/my-project.git
+git branch -M main
+git push -u origin main
+```
+
+**Which should you use?**
+
+| Method | Pros | Cons |
+|--------|------|------|
+| **HTTPS** | ✅ Easier setup<br>✅ Works everywhere<br>✅ No SSH key needed | ❌ Requires username/password or token<br>❌ Less convenient for frequent use |
+| **SSH** | ✅ No password needed after setup<br>✅ More secure<br>✅ Faster for frequent use | ❌ Requires SSH key setup<br>❌ May be blocked by some firewalls |
+
+**Setup SSH Keys:**
+1. Generate SSH key: https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent
+2. Add to GitHub: https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account
+
+**Quick SSH Setup:**
+```bash
+# 1. Generate SSH key (if you don't have one)
+ssh-keygen -t ed25519 -C "your_email@example.com"
+
+# 2. Start ssh-agent
+eval "$(ssh-agent -s)"
+
+# 3. Add key
+ssh-add ~/.ssh/id_ed25519
+
+# 4. Copy public key to clipboard
+# macOS:
+pbcopy < ~/.ssh/id_ed25519.pub
+# Linux:
+xclip -sel clip < ~/.ssh/id_ed25519.pub
+# Windows (Git Bash):
+cat ~/.ssh/id_ed25519.pub | clip
+
+# 5. Add to GitHub: https://github.com/settings/keys
+
+# 6. Test connection
+ssh -T git@github.com
 ```
 
 **Option 2: GitHub CLI (Easiest)**
@@ -183,27 +264,49 @@ gh repo create my-project --private --source=. --push
 
 ```bash
 cd my-project
+
+# HTTPS:
 git remote add origin https://github.com/USERNAME/existing-repo.git
+git branch -M main
+git push -u origin main
+
+# OR SSH:
+git remote add origin git@github.com:USERNAME/existing-repo.git
 git branch -M main
 git push -u origin main
 ```
 
 ### Change Remote URL
 
-If you need to change the repository URL:
+If you need to change the repository URL or switch between HTTPS and SSH:
 
 ```bash
 # Show current remote
 git remote -v
 
-# Change remote URL
-git remote set-url origin https://github.com/USERNAME/new-repo.git
+# Change to HTTPS
+git remote set-url origin https://github.com/USERNAME/repo.git
+
+# OR change to SSH
+git remote set-url origin git@github.com:USERNAME/repo.git
 
 # Verify
 git remote -v
 
 # Push
 git push -u origin main
+```
+
+**Switching from HTTPS to SSH:**
+```bash
+# If you started with HTTPS and want to switch to SSH
+git remote set-url origin git@github.com:USERNAME/repo.git
+```
+
+**Switching from SSH to HTTPS:**
+```bash
+# If you have SSH issues and need to use HTTPS
+git remote set-url origin https://github.com/USERNAME/repo.git
 ```
 
 ## Common Issues

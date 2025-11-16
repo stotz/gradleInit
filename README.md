@@ -677,9 +677,19 @@ Every project is automatically initialized as a Git repository:
 **Push to GitHub:**
 ```bash
 cd my-app
+
+# Using HTTPS (easier, requires username/password or token)
 git remote add origin https://github.com/username/my-app.git
+git branch -M main
+git push -u origin main
+
+# OR using SSH (recommended, requires SSH key setup)
+git remote add origin git@github.com:username/my-app.git
+git branch -M main
 git push -u origin main
 ```
+
+**SSH Setup:** https://docs.github.com/en/authentication/connecting-to-github-with-ssh
 
 **Or with GitHub CLI:**
 ```bash
