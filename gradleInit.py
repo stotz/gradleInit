@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple, Any
 # Version & Constants
 # ============================================================================
 
-SCRIPT_VERSION = "1.4.1"
+SCRIPT_VERSION = "1.4.2"
 MODULES_REPO = "https://github.com/stotz/gradleInitModules.git"
 TEMPLATES_REPO = "https://github.com/stotz/gradleInitTemplates.git"
 MODULES_VERSION = "main"  # Use main branch (v1.3.0 tag doesn't exist yet)
@@ -930,6 +930,19 @@ class TemplateRepository:
         """Update repository via git pull"""
         if not self.is_git:
             print_error(f"{self.name} is not a git repository")
+            print()
+            print_info("Templates were likely installed manually from archive.")
+            print_info("To enable updates:")
+            print()
+            print("  1. Remove current templates:")
+            print(f"     rm -rf {self.path}")
+            print()
+            print("  2. Clone from Git:")
+            print(f"     gradleInit templates --update")
+            print()
+            print("     OR manually:")
+            print(f"     git clone {self.url or 'REPO_URL'} {self.path}")
+            print()
             return False
 
         print_info(f"Updating {self.name} templates...")
@@ -968,7 +981,18 @@ class TemplateRepository:
             return True
 
         except subprocess.CalledProcessError as e:
-            print_error(f"Failed to update: {e.stderr}")
+            stderr = e.stderr.strip() if e.stderr else str(e)
+            print_error(f"Git command failed: {stderr}")
+            print()
+            print_info("This usually means templates are not a git repository.")
+            print_info("To fix:")
+            print()
+            print("  1. Remove current templates:")
+            print(f"     rm -rf {self.path}")
+            print()
+            print("  2. Clone from Git:")
+            print("     gradleInit templates --update")
+            print()
             return False
         except Exception as e:
             print_error(f"Update failed: {e}")
@@ -2388,7 +2412,16 @@ def handle_templates_command(args: argparse.Namespace,
 
         if not templates:
             print("No templates found.")
-            print("Run: gradleInit.py templates --update")
+            print()
+            print_info("To install templates:")
+            print()
+            print("  Option 1 - From Git (enables updates):")
+            print("    gradleInit templates --update")
+            print()
+            print("  Option 2 - From archive (manual):")
+            print("    tar -xjf gradleInitTemplates_v004.tar.bz2")
+            print("    cp -r gradleInitTemplates/* ~/.gradleInit/templates/official/")
+            print()
             return 0
 
         # Group by repository
