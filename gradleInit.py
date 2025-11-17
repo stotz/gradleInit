@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple, Any
 # Version & Constants
 # ============================================================================
 
-SCRIPT_VERSION = "1.4.2"
+SCRIPT_VERSION = "1.4.4"
 MODULES_REPO = "https://github.com/stotz/gradleInitModules.git"
 TEMPLATES_REPO = "https://github.com/stotz/gradleInitTemplates.git"
 MODULES_VERSION = "main"  # Use main branch (v1.3.0 tag doesn't exist yet)
@@ -2521,6 +2521,20 @@ def handle_templates_command(args: argparse.Namespace,
         success = repo_manager.add_custom_repository(name, url)
         return 0 if success else 1
 
+    # No args - show help
+    print_header("Templates Command")
+    print("Manage project templates")
+    print()
+    print("Usage:")
+    print("  gradleInit templates --list          List available templates")
+    print("  gradleInit templates --update        Update/clone templates from Git")
+    print("  gradleInit templates --info NAME     Show template details")
+    print()
+    print("Examples:")
+    print("  gradleInit templates --list")
+    print("  gradleInit templates --update")
+    print("  gradleInit templates --info kotlin-single")
+    print()
     return 0
 
 
@@ -2549,6 +2563,16 @@ def handle_config_command(args: argparse.Namespace, paths: GradleInitPaths) -> i
 
         return 0
 
+    # No args - show help
+    print_header("Config Command")
+    print("Manage gradleInit configuration")
+    print()
+    print("Usage:")
+    print("  gradleInit config --show      Show current configuration")
+    print("  gradleInit config --init      Initialize configuration")
+    print()
+    print("Configuration file: ~/.gradleInit/config")
+    print()
     return 0
 
 
@@ -2677,8 +2701,8 @@ def validate_cli_args_against_template(args: Dict[str, Any],
     errors = []
     
     for hint in hints:
-        # Get value from args using context_key
-        value = args.get(hint.context_key)
+        # Get value from args using name
+        value = args.get(hint.name)
         
         if value is None:
             continue
@@ -2686,7 +2710,7 @@ def validate_cli_args_against_template(args: Dict[str, Any],
         # Validate against regex
         is_valid, error_msg = validate_value_against_hint(value, hint)
         if not is_valid:
-            errors.append(f"Argument '--{hint.context_key}': {error_msg}")
+            errors.append(f"Argument '--{hint.name}': {error_msg}")
     
     return len(errors) == 0, errors
 
@@ -2776,7 +2800,7 @@ def handle_init_command(args: argparse.Namespace,
                 print("Template Variables:")
                 for hint in sorted(hints, key=lambda h: h.sort_order):
                     required = " (required)" if hint.required else " (optional)"
-                    print(f"  --{hint.context_key:20} {hint.help_text}{required}")
+                    print(f"  --{hint.name:20} {hint.help_text}{required}")
                     if hint.regex_pattern:
                         print(f"                           Pattern: {hint.regex_pattern}")
                     if hint.default:
@@ -2803,7 +2827,7 @@ def handle_init_command(args: argparse.Namespace,
         hints_map = {}
         if metadata:
             for hint in metadata.get_template_hints():
-                hints_map[hint.context_key] = hint
+                hints_map[hint.name] = hint
         
         # Prompt for group with config default
         if not args.group:
@@ -2839,22 +2863,22 @@ def handle_init_command(args: argparse.Namespace,
         if metadata:
             for hint in sorted(hints_map.values(), key=lambda h: h.sort_order):
                 # Skip already handled variables
-                if hint.context_key in ['group', 'version', 'project_name', 'gradle_version', 'kotlin_version']:
+                if hint.name in ['group', 'version', 'project_name', 'gradle_version', 'kotlin_version']:
                     continue
                 
                 # Check if CLI arg exists for this hint
-                cli_value = getattr(args, hint.context_key, None)
+                cli_value = getattr(args, hint.name, None)
                 if cli_value is None:
                     # Get default from config or hint
-                    default_value = get_config_default(config, hint.context_key, hint.default)
+                    default_value = get_config_default(config, hint.name, hint.default)
                     if default_value is not None or hint.required:
                         prompted_value = prompt_with_validation(
-                            hint.help_text or hint.context_key,
+                            hint.help_text or hint.name,
                             default_value,
                             hint,
                             allow_empty=not hint.required
                         )
-                        setattr(args, hint.context_key, prompted_value if prompted_value else default_value)
+                        setattr(args, hint.name, prompted_value if prompted_value else default_value)
 
     # Find template if not already loaded
     if not template_path:

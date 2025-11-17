@@ -557,6 +557,52 @@ class TestInitArguments(unittest.TestCase):
 
 
 # ============================================================================
+# Test Commands Without Arguments
+# ============================================================================
+
+class TestCommandsWithoutArgs(unittest.TestCase):
+    """Test that commands show help when called without arguments"""
+
+    def test_01_version_flag(self):
+        """Test --version flag"""
+        cmd = [sys.executable, str(Path(__file__).parent / 'gradleInit.py'), '--version']
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn('gradleInit v', result.stdout)
+        self.assertNotIn('usage:', result.stdout.lower())
+
+    def test_02_v_short_flag(self):
+        """Test -v short flag"""
+        cmd = [sys.executable, str(Path(__file__).parent / 'gradleInit.py'), '-v']
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn('gradleInit v', result.stdout)
+        self.assertNotIn('usage:', result.stdout.lower())
+
+    def test_03_templates_no_args(self):
+        """Test 'templates' without arguments shows help"""
+        cmd = [sys.executable, str(Path(__file__).parent / 'gradleInit.py'), 'templates']
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn('Templates Command', result.stdout)
+        self.assertIn('--list', result.stdout)
+        self.assertIn('--update', result.stdout)
+
+    def test_04_config_no_args(self):
+        """Test 'config' without arguments shows help"""
+        cmd = [sys.executable, str(Path(__file__).parent / 'gradleInit.py'), 'config']
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        
+        self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+        self.assertIn('Config Command', result.stdout)
+        self.assertIn('--show', result.stdout)
+        self.assertIn('--init', result.stdout)
+
+
+# ============================================================================
 # Test Runner
 # ============================================================================
 
@@ -570,6 +616,7 @@ def run_tests(verbosity=2):
     suite.addTests(loader.loadTestsFromTestCase(TestConfigCommand))
     suite.addTests(loader.loadTestsFromTestCase(TestInitCommand))
     suite.addTests(loader.loadTestsFromTestCase(TestInitArguments))
+    suite.addTests(loader.loadTestsFromTestCase(TestCommandsWithoutArgs))
 
     # Run tests
     runner = unittest.TextTestRunner(verbosity=verbosity)
