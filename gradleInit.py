@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple, Any
 # Version & Constants
 # ============================================================================
 
-SCRIPT_VERSION = "1.4.0"
+SCRIPT_VERSION = "1.4.1"
 MODULES_REPO = "https://github.com/stotz/gradleInitModules.git"
 TEMPLATES_REPO = "https://github.com/stotz/gradleInitTemplates.git"
 MODULES_VERSION = "main"  # Use main branch (v1.3.0 tag doesn't exist yet)
@@ -875,10 +875,10 @@ class TemplateRepository:
                         verbose=True
                     )
 
-                    # Remove .git directory to save space
-                    git_dir = self.path / '.git'
-                    if git_dir.exists():
-                        shutil.rmtree(git_dir, ignore_errors=True)
+                    # Keep .git directory for updates (don't remove)
+                    # git_dir = self.path / '.git'
+                    # if git_dir.exists():
+                    #     shutil.rmtree(git_dir, ignore_errors=True)
 
                     print_success(f"Cloned {self.name} templates")
                     return True
@@ -1508,6 +1508,14 @@ class TemplateMetadata:
         """Get variables discovered from inline hints"""
         return self.hint_variables
     
+    def get_template_hints(self) -> List[TemplateVariable]:
+        """
+        Get list of template variables with hints
+        
+        Returns sorted list of TemplateVariable objects from inline hints
+        """
+        return self.hint_parser.get_sorted_variables()
+    
     def compile_template_file(self, file_path: Path) -> str:
         """
         Compile a template file by removing inline hints
@@ -1532,6 +1540,10 @@ class DynamicCLIBuilder:
             formatter_class=argparse.RawDescriptionHelpFormatter,
             add_help=True
         )
+        
+        # Add version argument
+        parser.add_argument('-v', '--version', action='version',
+                          version=f'gradleInit v{SCRIPT_VERSION}')
 
         # Scoop integration (only show if SCOOP env is set)
         if SCOOP_DIR:
@@ -1558,7 +1570,7 @@ class DynamicCLIBuilder:
                                 help='Template name')
         base_group.add_argument('--group',
                                 help='Project group ID')
-        base_group.add_argument('--version', dest='project_version',
+        base_group.add_argument('--project-version', dest='project_version',
                                 help='Project version')
         base_group.add_argument('--author',
                                 help='Author name')
@@ -2705,7 +2717,7 @@ def handle_init_command(args: argparse.Namespace,
         print()
         print("Optional Arguments:")
         print("  --group GROUP             Maven group ID (e.g., com.example)")
-        print("  --version VERSION         Project version (e.g., 0.1.0)")
+        print("  --project-version VERSION Project version (e.g., 0.1.0)")
         print("  --config KEY=VALUE        Set template configuration")
         print()
         
@@ -2978,9 +2990,14 @@ def handle_init_command(args: argparse.Namespace,
 
 def main():
     """Main entry point"""
-
-    print(f"gradleInit v{SCRIPT_VERSION}")
-    print()
+    
+    # If --version is requested, let argparse handle it (avoids double output)
+    if '--version' in sys.argv or '-v' in sys.argv:
+        # Argparse will handle version display and exit
+        pass
+    else:
+        print(f"gradleInit v{SCRIPT_VERSION}")
+        print()
 
     # Check git availability
     if not GIT_AVAILABLE:
