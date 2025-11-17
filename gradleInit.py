@@ -928,6 +928,13 @@ class TemplateRepository:
 
     def update(self) -> bool:
         """Update repository via git pull"""
+
+        # Check if directory exists first
+        if not self.path.exists():
+            print_warning(f"{self.name} templates not found at {self.path}")
+            print_info("Attempting to clone...")
+            return self.clone()
+
         if not self.is_git:
             print_error(f"{self.name} is not a git repository")
             print()
@@ -2450,18 +2457,26 @@ def handle_templates_command(args: argparse.Namespace,
     if args.update:
         print_header("Updating Template Repositories")
 
+        # Check if official templates exist before trying to update
+        official_exists = repo_manager.repositories['official'].path.exists()
+
         if not repo_manager.ensure_official_templates():
             print_error("Failed to clone official templates")
             return 1
 
-        results = repo_manager.update_all()
+        # Only run update if templates existed before (not just cloned)
+        if official_exists:
+            results = repo_manager.update_all()
 
-        print()
-        for repo_name, success in results.items():
-            if success:
-                print_success(f"{repo_name} updated")
-            else:
-                print_error(f"{repo_name} update failed")
+            print()
+            for repo_name, success in results.items():
+                if success:
+                    print_success(f"{repo_name} updated")
+                else:
+                    print_error(f"{repo_name} update failed")
+        else:
+            print()
+            print_success("official templates cloned successfully")
 
         return 0
 
