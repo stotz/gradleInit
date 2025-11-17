@@ -58,7 +58,12 @@ class TestConfigIntegration:
     def teardown_method(self):
         """Cleanup test environment"""
         if Path(self.test_dir).exists():
-            shutil.rmtree(self.test_dir)
+            try:
+                # On Windows, git files might be locked - use ignore_errors
+                shutil.rmtree(self.test_dir, ignore_errors=True)
+            except Exception as e:
+                # If still fails, just warn - cleanup not critical
+                print(f"\n[WARN] Could not cleanup {self.test_dir}: {e}")
     
     def write_config(self, content: str):
         """Write config file"""
@@ -97,7 +102,7 @@ email = "test@example.com"
         project_dir = Path(self.test_dir) / "testApp"
         returncode, stdout, stderr = run_command(
             [sys.executable, str(self.gradleInit_py), "init", "testApp", 
-             "--template", "kotlin-single"],
+             "--template", "kotlin-single", "--no-interactive"],
             cwd=self.test_dir,
             env=self.env
         )
@@ -130,6 +135,8 @@ email = "test@example.com"
 [defaults]
 group = "ch.typedef"
 version = "0.0.1"
+gradle_version = "8.14"
+kotlin_version = "2.1.0"
 jdk_version = "21"
 """
         self.write_config(config_content)
@@ -140,8 +147,9 @@ jdk_version = "21"
             [sys.executable, str(self.gradleInit_py), "init", "testApp",
              "--template", "kotlin-single",
              "--group", "com.override",
-             "--version", "2.0.0",
-             "--jdk_version", "17"],
+             "--project-version", "2.0.0",
+             "--jdk_version", "17",
+             "--no-interactive"],
             cwd=self.test_dir,
             env=self.env
         )
@@ -173,12 +181,26 @@ jdk_version = "21"
 group = "ch.typedef"
 version = "0.0.1"
 gradle_version = "8.14.3"
+kotlin_version = "2.1.0"
+jdk_version = "21"
 """
         self.write_config(config_content)
         
+        # First, update templates (required for interactive mode)
+        returncode, stdout, stderr = run_command(
+            [sys.executable, str(self.gradleInit_py), "templates", "--update"],
+            env=self.env
+        )
+        assert returncode == 0, f"Templates update failed: {stderr}"
+        
         # Run interactive mode with just Enter keys (use defaults)
-        # Input: empty for group, empty for version, 1 for gradle
-        input_text = "kotlin-single\n\n\n1\n"
+        # Input sequence:
+        #   1. "n" - Skip module download
+        #   2. "kotlin-single" - Choose template
+        #   3. "" (empty) - Use default group (ch.typedef)
+        #   4. "" (empty) - Use default version (0.0.1)
+        #   5. "1" - Choose Gradle version option 1
+        input_text = "n\nkotlin-single\n\n\n1\n"
         
         returncode, stdout, stderr = run_command(
             [sys.executable, str(self.gradleInit_py), "init", "testApp", "--interactive"],
@@ -217,6 +239,8 @@ gradle_version = "8.14.3"
 [defaults]
 group = "ch.typedef"
 version = "0.0.1"
+gradle_version = "8.14"
+kotlin_version = "2.1.0"
 jdk_version = "8"
 """
         self.write_config(config_content)
@@ -224,7 +248,7 @@ jdk_version = "8"
         # Try to create project - should fail validation
         returncode, stdout, stderr = run_command(
             [sys.executable, str(self.gradleInit_py), "init", "testApp",
-             "--template", "kotlin-single"],
+             "--template", "kotlin-single", "--no-interactive"],
             cwd=self.test_dir,
             env=self.env
         )
@@ -252,6 +276,9 @@ jdk_version = "8"
 [defaults]
 group = "ch.typedef"
 version = "0.0.1"
+gradle_version = "8.14"
+kotlin_version = "2.1.0"
+jdk_version = "21"
 """
         self.write_config(config_content)
         
@@ -263,7 +290,7 @@ version = "0.0.1"
         project_dir = Path(self.test_dir) / "testApp"
         returncode, stdout, stderr = run_command(
             [sys.executable, str(self.gradleInit_py), "init", "testApp",
-             "--template", "kotlin-single"],
+             "--template", "kotlin-single", "--no-interactive"],
             cwd=self.test_dir,
             env=test_env
         )
@@ -295,6 +322,8 @@ version = "0.0.1"
 [defaults]
 group = "ch.typedef"
 version = "1.0.0"
+gradle_version = "8.14"
+kotlin_version = "2.1.0"
 jdk_version = "21"
 """
         self.write_config(config_content)
@@ -308,7 +337,8 @@ jdk_version = "21"
         returncode, stdout, stderr = run_command(
             [sys.executable, str(self.gradleInit_py), "init", "testApp",
              "--template", "kotlin-single",
-             "--version", "3.0.0"],
+             "--project-version", "3.0.0",
+             "--no-interactive"],
             cwd=self.test_dir,
             env=test_env
         )

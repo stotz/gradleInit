@@ -1,0 +1,216 @@
+root = true
+
+############################
+# Global defaults
+############################
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 4
+tab_width = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+max_line_length = 120
+
+############################
+# Kotlin / Java / Groovy / Gradle
+############################
+[*.{kt,kts,ktx,java,groovy,gradle,gradle.kts}]
+indent_size = 4
+tab_width = 4
+
+############################
+# C, C++, Rust, Go
+############################
+[*.{c,cpp,h,hpp,cc,cxx,hh,hxx}]
+indent_size = 4
+
+[*.rs]
+indent_size = 4
+
+[*.go]
+indent_size = 4
+
+############################
+# Swift
+############################
+[*.swift]
+indent_size = 4
+
+############################
+# Python
+############################
+[*.py]
+indent_size = 4
+
+############################
+# Perl
+############################
+[*.{pl,pm}]
+indent_size = 4
+
+############################
+# Shell / Bash
+############################
+[*.{sh,bash}]
+indent_size = 2
+
+############################
+# Batch / PowerShell
+############################
+[*.{bat,cmd}]
+end_of_line = crlf
+indent_size = 4
+
+[*.{ps1,psm1}]
+indent_size = 4
+
+############################
+# Web: HTML / CSS / SCSS / LESS
+############################
+[*.{html,htm,css,scss,less}]
+indent_size = 2
+
+############################
+# JavaScript / TypeScript
+############################
+[*.{js,jsx,ts,tsx}]
+indent_size = 2
+max_line_length = 120
+
+############################
+# Vue / Svelte
+############################
+[*.{vue,svelte}]
+indent_size = 2
+
+############################
+# Declarative formats:
+# YAML / JSON / XML / XSD / TOML / Proto / IDL
+############################
+[*.{yml,yaml,json,xml,xsd,toml,proto,idl}]
+indent_size = 2
+max_line_length = 120
+
+############################
+# Terraform (HCL)
+############################
+[*.{tf,tfvars}]
+indent_size = 2
+max_line_length = 120
+
+############################
+# SQL
+############################
+[*.sql]
+indent_size = 4
+max_line_length = off
+
+############################
+# LaTeX / TeX
+############################
+[*.{tex,latex}]
+indent_size = 2
+max_line_length = off
+
+############################
+# PlantUML
+############################
+[*.{puml,plantuml}]
+indent_size = 2
+
+############################
+# Markdown / Documentation
+############################
+[*.{md,markdown}]
+indent_size = 2
+max_line_length = off
+trim_trailing_whitespace = false
+
+############################
+# CMake
+############################
+[*.cmake]
+indent_size = 2
+
+[CMakeLists.txt]
+indent_size = 2
+
+############################
+# Makefiles (tabs required; spaces break make recipes)
+############################
+[Makefile]
+indent_style = tab
+tab_width = 4
+
+[makefile]
+indent_style = tab
+tab_width = 4
+
+[GNUmakefile]
+indent_style = tab
+tab_width = 4
+
+############################
+# Docker
+############################
+[Dockerfile*]
+indent_size = 4
+
+[docker-compose*.yml]
+indent_size = 2
+
+############################
+# Properties / .env / INI
+############################
+[*.{properties,env,ini}]
+indent_size = 2
+max_line_length = off
+
+############################
+# CSV / TSV
+############################
+[*.{csv,tsv}]
+trim_trailing_whitespace = false
+max_line_length = off
+
+############################
+# Jenkinsfile (Groovy-based CI pipelines)
+############################
+[Jenkinsfile]
+indent_size = 4
+
+############################
+# Clang tooling
+############################
+[.clang-format]
+indent_size = 2
+
+[.clang-tidy]
+indent_size = 2
+
+############################
+# Node / frontend tooling configs
+############################
+[*.{npmrc,prettierrc,eslintrc}]
+indent_size = 2
+
+############################
+# Binary and non-text files (do not enforce formatting)
+############################
+[*.{jar,zip,tar,tar.gz,exe,bin,dll,so,png,jpg,jpeg,ico,gif,bmp,webp}]
+indent_style = unset
+charset = unset
+end_of_line = unset
+trim_trailing_whitespace = unset
+insert_final_newline = unset
+
+############################
+# Editor and Git configuration files
+############################
+[*.editorconfig]
+indent_size = 4
+
+[*.{gitignore,gitattributes,gitconfig}]
+indent_size = 4
