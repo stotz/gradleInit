@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple, Any
 # Version & Constants
 # ============================================================================
 
-SCRIPT_VERSION = "1.4.8"
+SCRIPT_VERSION = "1.5.1"
 MODULES_REPO = "https://github.com/stotz/gradleInitModules.git"
 TEMPLATES_REPO = "https://github.com/stotz/gradleInitTemplates.git"
 MODULES_VERSION = "main"  # Use main branch (v1.3.0 tag doesn't exist yet)
@@ -2679,8 +2679,8 @@ def prompt_with_validation(prompt_text: str,
             is_valid, error_msg = validate_value_against_hint(user_input, hint)
             if not is_valid:
                 print_error(error_msg)
-                if hint.default:
-                    print_info(f"Press Enter to use default: {hint.default}")
+                if hint.default_value:
+                    print_info(f"Press Enter to use default: {hint.default_value}")
                 continue
         
         return user_input
@@ -2729,8 +2729,35 @@ def handle_init_command(args: argparse.Namespace,
                 print_error("Project name required")
                 return 1
         else:
-            print_error("Project name required")
-            print_info("Usage: gradleInit.py init PROJECT_NAME --template TEMPLATE")
+            # Show helpful usage information instead of just error
+            print_header("Init Command")
+            print()
+            print("Initialize a new Gradle/Kotlin project from template")
+            print()
+            print("Usage:")
+            print("  gradleInit init PROJECT_NAME --template TEMPLATE [OPTIONS]")
+            print()
+            print("Required:")
+            print("  PROJECT_NAME              Name of the project to create")
+            print("  --template TEMPLATE       Template to use (kotlin-single, kotlin-multi, etc.)")
+            print()
+            print("Options:")
+            print("  --group GROUP             Group ID (default: com.example)")
+            print("  --project-version VER     Project version (default: 1.0.0)")
+            print("  --gradle-version VER      Gradle version to use")
+            print("  --kotlin-version VER      Kotlin version to use")
+            print("  --jdk-version VER         JDK version (11, 17, 21)")
+            print("  --interactive             Interactive mode with prompts")
+            print("  --no-interactive          Non-interactive mode (default)")
+            print()
+            print("Examples:")
+            print("  gradleInit init myApp --template kotlin-single")
+            print("  gradleInit init myApp --template kotlin-single --group com.example")
+            print("  gradleInit init myApp --template springboot --gradle-version 8.11")
+            print("  gradleInit init myApp --interactive")
+            print()
+            print("List available templates:")
+            print("  gradleInit templates --list")
             return 1
 
     if not args.template:
@@ -2760,8 +2787,23 @@ def handle_init_command(args: argparse.Namespace,
                 # Try as template name
                 args.template = choice
         else:
-            print_error("Template required. Use --template <name>")
-            print_info("Run: gradleInit.py templates --list")
+            # Show helpful message for missing template
+            print_header("Init Command")
+            print()
+            print("Template required")
+            print()
+            print("Usage:")
+            print("  gradleInit init PROJECT_NAME --template TEMPLATE")
+            print()
+            print("Examples:")
+            print("  gradleInit init myApp --template kotlin-single")
+            print("  gradleInit init myApp --template springboot")
+            print()
+            print("List available templates:")
+            print("  gradleInit templates --list")
+            print()
+            print("Or use interactive mode:")
+            print("  gradleInit init myApp --interactive")
             return 1
 
     # Load config BEFORE interactive prompts so we can use config defaults
@@ -2799,12 +2841,13 @@ def handle_init_command(args: argparse.Namespace,
             if hints:
                 print("Template Variables:")
                 for hint in sorted(hints, key=lambda h: h.sort_order):
-                    required = " (required)" if hint.required else " (optional)"
-                    print(f"  --{hint.name:20} {hint.help_text}{required}")
+                    # All variables are optional (required attribute not defined)
+                    optional = " (optional)" if hint.default_value else ""
+                    print(f"  --{hint.name:20} {hint.help_text}{optional}")
                     if hint.regex_pattern:
                         print(f"                           Pattern: {hint.regex_pattern}")
-                    if hint.default:
-                        print(f"                           Default: {hint.default}")
+                    if hint.default_value:
+                        print(f"                           Default: {hint.default_value}")
                 print()
         
         print("Examples:")
@@ -2870,15 +2913,15 @@ def handle_init_command(args: argparse.Namespace,
                 cli_value = getattr(args, hint.name, None)
                 if cli_value is None:
                     # Get default from config or hint
-                    default_value = get_config_default(config, hint.name, hint.default)
-                    if default_value is not None or hint.required:
-                        prompted_value = prompt_with_validation(
-                            hint.help_text or hint.name,
-                            default_value,
-                            hint,
-                            allow_empty=not hint.required
-                        )
-                        setattr(args, hint.name, prompted_value if prompted_value else default_value)
+                    default_value = get_config_default(config, hint.name, hint.default_value)
+                    # Prompt for value (all variables are optional, allow empty input)
+                    prompted_value = prompt_with_validation(
+                        hint.help_text or hint.name,
+                        default_value,
+                        hint,
+                        allow_empty=True  # All variables are optional
+                    )
+                    setattr(args, hint.name, prompted_value if prompted_value else default_value)
 
     # Find template if not already loaded
     if not template_path:
