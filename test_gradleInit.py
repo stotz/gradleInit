@@ -190,12 +190,21 @@ class TestTemplateGeneration(unittest.TestCase):
             'kotlin_version': '2.2.0',
             'gradle_version': '9.0',
             'jdk_version': 21,
+            'vendor': 'Test Vendor',
             'date': '2025-11-15',
             **kwargs
         }
 
-        # Generate project (correct parameter order: template_path, context, target_path)
-        generator = ProjectGenerator(template_path, context, project_path)
+        # Create template metadata with compiled cache
+        from pathlib import Path
+        import tempfile
+        cache_dir = Path(tempfile.gettempdir()) / 'gradleInit_test_cache'
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        from gradleInit import TemplateMetadata
+        metadata = TemplateMetadata(template_path, cache_dir)
+
+        # Generate project (correct parameter order: template_path, context, target_path, template_metadata)
+        generator = ProjectGenerator(template_path, context, project_path, metadata)
         success = generator.generate()
 
         if not success:
@@ -553,6 +562,189 @@ class TestIntegration(unittest.TestCase):
 
 
 # ============================================================================
+# Jinja2 Features Tests
+# ============================================================================
+
+class TestJinja2Features(unittest.TestCase):
+    """Test Jinja2 template features"""
+
+    def test_datetime_functions(self):
+        """Test datetime functions in templates"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            template_dir = Path(temp_dir) / "test_template"
+            template_dir.mkdir(parents=True)
+            
+            # Create test template
+            test_file = template_dir / "test.txt"
+            test_file.write_text("""
+Current year: {{ now().year }}
+Current month: {{ now().month }}
+Formatted: {{ now().strftime('%Y-%m-%d') }}
+""")
+            
+            # Generate
+            paths = GradleInitPaths(temp_dir)
+            context = {
+                'project_name': 'test',
+                'group': 'com.test',
+                'version': '1.0.0'
+            }
+            
+            gen = ProjectGenerator(template_dir, paths, context)
+            output_dir = Path(temp_dir) / "output"
+            gen._render_file(test_file, output_dir / "test.txt", context)
+            
+            # Verify
+            result = (output_dir / "test.txt").read_text()
+            self.assertIn("Current year:", result)
+            self.assertNotIn("{{ now()", result)
+            self.assertNotIn("now().year", result)
+
+    def test_env_function(self):
+        """Test environment variable access in templates"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            template_dir = Path(temp_dir) / "test_template"
+            template_dir.mkdir(parents=True)
+            
+            # Set test environment variable
+            os.environ['TEST_VAR'] = 'test_value'
+            
+            # Create test template
+            test_file = template_dir / "test.txt"
+            test_file.write_text("""
+Test var: {{ env('TEST_VAR', 'default') }}
+Missing: {{ env('MISSING_VAR', 'default') }}
+""")
+            
+            # Generate
+            paths = GradleInitPaths(temp_dir)
+            context = {
+                'project_name': 'test',
+                'group': 'com.test',
+                'version': '1.0.0'
+            }
+            
+            gen = ProjectGenerator(template_dir, paths, context)
+            output_dir = Path(temp_dir) / "output"
+            gen._render_file(test_file, output_dir / "test.txt", context)
+            
+            # Verify
+            result = (output_dir / "test.txt").read_text()
+            self.assertIn("Test var: test_value", result)
+            self.assertIn("Missing: default", result)
+            
+            # Cleanup
+            del os.environ['TEST_VAR']
+
+    def test_datetime_filters(self):
+        """Test datetime formatting filters"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            template_dir = Path(temp_dir) / "test_template"
+            template_dir.mkdir(parents=True)
+            
+            # Create test template
+            test_file = template_dir / "test.txt"
+            test_file.write_text("""
+Timestamp: {{ timestamp }}
+Date: {{ timestamp | date }}
+Time: {{ timestamp | time }}
+Custom: {{ timestamp | datetime('%Y/%m/%d') }}
+""")
+            
+            # Generate
+            paths = GradleInitPaths(temp_dir)
+            context = {
+                'project_name': 'test',
+                'group': 'com.test',
+                'version': '1.0.0'
+            }
+            
+            gen = ProjectGenerator(template_dir, paths, context)
+            output_dir = Path(temp_dir) / "output"
+            gen._render_file(test_file, output_dir / "test.txt", context)
+            
+            # Verify
+            result = (output_dir / "test.txt").read_text()
+            self.assertIn("Timestamp:", result)
+            self.assertIn("Date:", result)
+            self.assertIn("Time:", result)
+            self.assertIn("Custom:", result)
+            # Should contain formatted date like YYYY-MM-DD
+            import re
+            self.assertTrue(re.search(r'\d{4}-\d{2}-\d{2}', result))
+
+    def test_config_function(self):
+        """Test config() function in templates"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            template_dir = Path(temp_dir) / "test_template"
+            template_dir.mkdir(parents=True)
+            
+            # Create test template
+            test_file = template_dir / "test.txt"
+            test_file.write_text("""
+Author: {{ config('custom.author', 'Unknown') }}
+Company: {{ config('custom.company', 'N/A') }}
+Missing: {{ config('custom.missing', 'default') }}
+""")
+            
+            # Generate with custom config
+            paths = GradleInitPaths(temp_dir)
+            context = {
+                'project_name': 'test',
+                'group': 'com.test',
+                'version': '1.0.0',
+                'custom': {
+                    'author': 'Test Author',
+                    'company': 'Test Company'
+                }
+            }
+            
+            gen = ProjectGenerator(template_dir, paths, context)
+            output_dir = Path(temp_dir) / "output"
+            gen._render_file(test_file, output_dir / "test.txt", context)
+            
+            # Verify
+            result = (output_dir / "test.txt").read_text()
+            self.assertIn("Author: Test Author", result)
+            self.assertIn("Company: Test Company", result)
+            self.assertIn("Missing: default", result)
+
+    def test_naming_convention_filters(self):
+        """Test naming convention filters"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            template_dir = Path(temp_dir) / "test_template"
+            template_dir.mkdir(parents=True)
+            
+            # Create test template
+            test_file = template_dir / "test.txt"
+            test_file.write_text("""
+camelCase: {{ project_name | camelCase }}
+PascalCase: {{ project_name | PascalCase }}
+snake_case: {{ project_name | snake_case }}
+kebab-case: {{ project_name | kebab_case }}
+""")
+            
+            # Generate
+            paths = GradleInitPaths(temp_dir)
+            context = {
+                'project_name': 'my_test_app',
+                'group': 'com.test',
+                'version': '1.0.0'
+            }
+            
+            gen = ProjectGenerator(template_dir, paths, context)
+            output_dir = Path(temp_dir) / "output"
+            gen._render_file(test_file, output_dir / "test.txt", context)
+            
+            # Verify
+            result = (output_dir / "test.txt").read_text()
+            self.assertIn("camelCase: myTestApp", result)
+            self.assertIn("PascalCase: MyTestApp", result)
+            self.assertIn("snake_case: my_test_app", result)
+            self.assertIn("kebab-case: my-test-app", result)
+
+
+# ============================================================================
 # Performance Tests
 # ============================================================================
 
@@ -588,11 +780,18 @@ class TestPerformance(unittest.TestCase):
                 'version': '1.0.0',
                 'kotlin_version': '2.2.0',
                 'jdk_version': 21,
+                'vendor': 'Test Vendor',
                 'date': '2025-11-15'
             }
 
+            # Create template metadata with cache
+            from gradleInit import TemplateMetadata
+            cache_dir = temp_dir / 'cache'
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            metadata = TemplateMetadata(template_path, cache_dir)
+
             start = time.time()
-            generator = ProjectGenerator(template_path, context, project_path)
+            generator = ProjectGenerator(template_path, context, project_path, metadata)
             success = generator.generate()
             elapsed = time.time() - start
 
@@ -617,6 +816,7 @@ def run_tests(verbosity=2):
     suite.addTests(loader.loadTestsFromTestCase(TestGitHubURLParsing))
     suite.addTests(loader.loadTestsFromTestCase(TestTemplateGeneration))
     suite.addTests(loader.loadTestsFromTestCase(TestIntegration))
+    suite.addTests(loader.loadTestsFromTestCase(TestJinja2Features))
     suite.addTests(loader.loadTestsFromTestCase(TestPerformance))
 
     # Run tests

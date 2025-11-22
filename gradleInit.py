@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple, Any
 # Version & Constants
 # ============================================================================
 
-SCRIPT_VERSION = "1.5.1"
+SCRIPT_VERSION = "1.6.1"
 MODULES_REPO = "https://github.com/stotz/gradleInitModules.git"
 TEMPLATES_REPO = "https://github.com/stotz/gradleInitTemplates.git"
 MODULES_VERSION = "main"  # Use main branch (v1.3.0 tag doesn't exist yet)
@@ -514,7 +514,17 @@ class GradleInitPaths:
     """Manage ~/.gradleInit/ directory structure"""
 
     def __init__(self, base_dir: Optional[Path] = None):
-        self.base_dir = base_dir or (Path.home() / '.gradleInit')
+        # Ensure base_dir is always a Path object
+        if base_dir:
+            self.base_dir = Path(base_dir) if not isinstance(base_dir, Path) else base_dir
+        else:
+            # Respect HOME environment variable for testing
+            import os
+            home = os.environ.get('HOME')
+            if home:
+                self.base_dir = Path(home) / '.gradleInit'
+            else:
+                self.base_dir = Path.home() / '.gradleInit'
 
         # Subdirectories
         self.config_file = self.base_dir / 'config'
@@ -528,6 +538,7 @@ class GradleInitPaths:
 
         # Cache subdirectories
         self.remote_cache = self.cache_dir / 'remote'
+        self.compiled_templates = self.cache_dir / 'compiled'
 
     def ensure_structure(self):
         """Create directory structure if it doesn't exist"""
@@ -536,6 +547,7 @@ class GradleInitPaths:
         self.official_templates.mkdir(exist_ok=True)  # Create official templates dir
         self.cache_dir.mkdir(exist_ok=True)
         self.remote_cache.mkdir(exist_ok=True)
+        self.compiled_templates.mkdir(exist_ok=True)
         self.custom_templates.mkdir(exist_ok=True)
 
         # Create default config if not exists
@@ -1420,15 +1432,117 @@ class TemplateMetadata:
     2. Inline hints in template files (new)
     
     Inline hints take precedence for discovered variables.
+    
+    Additionally manages compiled template cache to avoid
+    re-compiling templates on every render.
     """
 
-    def __init__(self, template_path: Path):
+    def __init__(self, template_path: Path, compiled_cache_dir: Optional[Path] = None):
         self.template_path = template_path
+        self.compiled_cache_dir = compiled_cache_dir
         self.metadata = self._parse_metadata()
         
         # Parse inline hints from template files
         self.hint_parser = TemplateHintParser(template_path)
         self.hint_variables = self.hint_parser.parse_templates()
+        
+        # Initialize compiled cache if provided
+        if self.compiled_cache_dir:
+            self._ensure_cache_structure()
+    
+    def _ensure_cache_structure(self):
+        """Ensure compiled cache directory exists"""
+        if self.compiled_cache_dir:
+            self.compiled_cache_dir.mkdir(parents=True, exist_ok=True)
+    
+    def _get_compiled_file_path(self, source_file: Path) -> Optional[Path]:
+        """
+        Get path for compiled version of template file
+        
+        Args:
+            source_file: Original template file path
+        
+        Returns:
+            Path to compiled file in cache, or None if no cache configured
+        """
+        if not self.compiled_cache_dir:
+            return None
+        
+        # Create relative path from template root
+        try:
+            rel_path = source_file.relative_to(self.template_path)
+        except ValueError:
+            # File not in template directory
+            return None
+        
+        # Create unique cache path based on template name and file path
+        template_name = self.template_path.name
+        cache_file = self.compiled_cache_dir / template_name / rel_path
+        
+        return cache_file
+    
+    def _is_cache_valid(self, source_file: Path, compiled_file: Path) -> bool:
+        """
+        Check if compiled cache is still valid
+        
+        Args:
+            source_file: Original template file
+            compiled_file: Compiled cache file
+        
+        Returns:
+            True if cache is valid (compiled file is newer than source)
+        """
+        if not compiled_file.exists():
+            return False
+        
+        source_mtime = source_file.stat().st_mtime
+        compiled_mtime = compiled_file.stat().st_mtime
+        
+        return compiled_mtime >= source_mtime
+    
+    def get_compiled_content(self, source_file: Path) -> str:
+        """
+        Get compiled template content (cached or freshly compiled)
+        
+        This method handles caching logic:
+        1. Check if compiled cache exists and is valid
+        2. If valid, return cached content
+        3. Otherwise, compile template and cache result
+        
+        Args:
+            source_file: Original template file path
+        
+        Returns:
+            Compiled template content (with hints removed)
+        """
+        # Get cache file path
+        compiled_file = self._get_compiled_file_path(source_file)
+        
+        # If no cache configured, compile directly
+        if not compiled_file:
+            return self.hint_parser.compile_template(source_file)
+        
+        # Check if cache is valid
+        if self._is_cache_valid(source_file, compiled_file):
+            # Return cached content
+            try:
+                return compiled_file.read_text(encoding='utf-8')
+            except (OSError, UnicodeDecodeError):
+                # Cache corrupted, recompile
+                pass
+        
+        # Compile template
+        compiled_content = self.hint_parser.compile_template(source_file)
+        
+        # Cache compiled content
+        try:
+            compiled_file.parent.mkdir(parents=True, exist_ok=True)
+            compiled_file.write_text(compiled_content, encoding='utf-8')
+        except OSError:
+            # Failed to cache, but we have compiled content
+            pass
+        
+        return compiled_content
 
     def _parse_metadata(self) -> Dict[str, Any]:
         """Parse YAML frontmatter from TEMPLATE.md"""
@@ -1551,9 +1665,12 @@ class TemplateMetadata:
         """
         Compile a template file by removing inline hints
         
+        Uses caching to avoid recompiling unchanged templates.
+        Cache is invalidated when source file is modified.
+        
         Returns compiled content ready for Jinja2
         """
-        return self.hint_parser.compile_template(file_path)
+        return self.get_compiled_content(file_path)
 
 
 # ============================================================================
@@ -1694,19 +1811,18 @@ class DynamicCLIBuilder:
 
             if arg.type == 'boolean':
                 kwargs['action'] = 'store_true'
-                if arg.default:
-                    kwargs['default'] = arg.default
+                # Don't set default - let ContextBuilder handle it with proper priority
             elif arg.type == 'choice':
                 kwargs['choices'] = arg.choices
-                kwargs['default'] = arg.default
+                # Don't set default - let ContextBuilder handle it with proper priority
                 if arg.choices:
                     kwargs['metavar'] = '{' + ','.join(arg.choices) + '}'
             elif arg.type == 'string':
                 kwargs['type'] = str
-                kwargs['default'] = arg.default
+                # Don't set default - let ContextBuilder handle it with proper priority
             elif arg.type == 'integer':
                 kwargs['type'] = int
-                kwargs['default'] = arg.default
+                # Don't set default - let ContextBuilder handle it with proper priority
 
             if arg.required:
                 kwargs['required'] = True
@@ -1798,8 +1914,12 @@ class ContextBuilder:
         # 6. Template-specific defaults
         template_args = self.template_metadata.get_arguments()
         for arg in template_args:
-            if arg.context_key not in context and arg.default is not None:
-                context[arg.context_key] = arg.default
+            if arg.context_key not in context:
+                if arg.default is not None:
+                    context[arg.context_key] = arg.default
+                else:
+                    # Variables without defaults get empty string (allows optional variables)
+                    context[arg.context_key] = ""
 
         return context
 
@@ -1876,9 +1996,37 @@ def setup_jinja2_environment(template_path: Path, context: Dict[str, Any] = None
     env.filters['capitalize_first'] = lambda s: s[0].upper() + s[1:] if s else s
     env.filters['lower_first'] = lambda s: s[0].lower() + s[1:] if s else s
 
+    # Custom datetime filters
+    def format_datetime(dt_str: str, fmt: str = '%Y-%m-%d %H:%M:%S') -> str:
+        """Format a datetime string or datetime object"""
+        try:
+            if isinstance(dt_str, str):
+                # Try parsing ISO format first
+                dt = datetime.fromisoformat(dt_str)
+            elif isinstance(dt_str, datetime):
+                dt = dt_str
+            else:
+                return str(dt_str)
+            return dt.strftime(fmt)
+        except (ValueError, AttributeError):
+            return str(dt_str)
+    
+    env.filters['datetime'] = format_datetime
+    env.filters['date'] = lambda dt, fmt='%Y-%m-%d': format_datetime(dt, fmt)
+    env.filters['time'] = lambda dt, fmt='%H:%M:%S': format_datetime(dt, fmt)
+
     # Custom tests
     env.tests['springboot'] = lambda x: 'springboot' in str(x).lower()
     env.tests['ktor'] = lambda x: 'ktor' in str(x).lower()
+
+    # Add utility functions as globals
+    env.globals['now'] = datetime.now
+    env.globals['datetime'] = datetime
+    
+    # Add environment access
+    import os as _os
+    env.globals['env'] = _os.environ.get
+    env.globals['getenv'] = _os.getenv
 
     # Add config function as global
     if context:
@@ -2815,7 +2963,7 @@ def handle_init_command(args: argparse.Namespace,
     if args.template:
         template_path = repo_manager.find_template(args.template)
         if template_path:
-            metadata = TemplateMetadata(template_path)
+            metadata = TemplateMetadata(template_path, paths.compiled_templates)
     
     # Template-aware help
     if args.help:
@@ -2934,7 +3082,7 @@ def handle_init_command(args: argparse.Namespace,
 
     # Load template metadata if not already loaded
     if not metadata:
-        metadata = TemplateMetadata(template_path)
+        metadata = TemplateMetadata(template_path, paths.compiled_templates)
     
     # CLI Validation - validate all CLI args against template hints
     if not args.interactive:
@@ -2997,8 +3145,14 @@ def handle_init_command(args: argparse.Namespace,
         
         # Prepare CLI args dict and map project_version to version
         cli_args_dict = vars(args)
+        
+        # Map project_version to version, but ONLY if explicitly set
         if 'project_version' in cli_args_dict and cli_args_dict['project_version'] is not None:
             cli_args_dict['version'] = cli_args_dict['project_version']
+        elif 'version' in cli_args_dict:
+            # Remove version if it exists but project_version wasn't set
+            # This allows config defaults to be used
+            del cli_args_dict['version']
         
         context_builder = ContextBuilder(
             config=config,

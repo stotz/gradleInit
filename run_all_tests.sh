@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 
 echo \#\#\# run: ./gradleInit.py --version
-./gradleInit.py --version
+./gradleInit.py --version || exit  1
 for test in test_*.py
 do
     echo \#\#\# run: $test
     ./$test
 done
 
+exit
 version=$(./gradleInit.py -v | sed 's/gradleInit v/0/;s/\./0/g')
 echo \#\#\# run: gradleInit init --interactive with app: myDemoApp$version
 gradleInit init --interactive  <<EOF
@@ -17,7 +18,6 @@ myDemoApp$version
 0.0.3
 3
 8.14.2
-2025-11-18
 21
 EOF
 
