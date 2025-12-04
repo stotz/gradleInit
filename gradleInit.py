@@ -1649,6 +1649,21 @@ class TemplateMetadata:
         """Get template requirements"""
         return self.metadata.get('requirements', {})
     
+    def get_raw_copy_files(self) -> set:
+        """
+        Get files that should be copied without Jinja2 rendering
+        
+        These files contain syntax that conflicts with Jinja2 (e.g. Bash ${#...})
+        and are defined in TEMPLATE.md under 'raw_copy' list.
+        
+        Returns:
+            Set of filenames to copy raw (without rendering)
+        """
+        raw_copy = self.metadata.get('raw_copy', [])
+        if isinstance(raw_copy, list):
+            return set(raw_copy)
+        return set()
+    
     def get_hint_variables(self) -> Dict[str, TemplateVariable]:
         """Get variables discovered from inline hints"""
         return self.hint_variables
@@ -2210,8 +2225,16 @@ class ProjectGenerator:
         # Ensure parent directory exists
         target_file.parent.mkdir(parents=True, exist_ok=True)
 
+        # Check if file should be copied without rendering (raw copy)
+        # This is configured per-template in TEMPLATE.md raw_copy list
+        raw_copy_files = set()
+        if self.template_metadata:
+            raw_copy_files = self.template_metadata.get_raw_copy_files()
+        
+        if source_file.name in raw_copy_files:
+            self._copy_raw_file(source_file, target_file)
         # Check if file should be rendered as text
-        if self._is_text_file(source_file):
+        elif self._is_text_file(source_file):
             self._render_text_file(source_file, target_file)
         else:
             self._copy_binary_file(source_file, target_file)
@@ -2268,6 +2291,18 @@ class ProjectGenerator:
         shutil.copy2(source_file, target_file)
         rel_path = source_file.relative_to(self.template_path)
         print_info(f"  -> {rel_path}")
+
+    def _copy_raw_file(self, source_file: Path, target_file: Path):
+        """
+        Copy file without Jinja2 rendering (for files with conflicting syntax)
+
+        Args:
+            source_file: Source file
+            target_file: Target file
+        """
+        shutil.copy2(source_file, target_file)
+        rel_path = source_file.relative_to(self.template_path)
+        print_info(f"  [OK] {rel_path} (raw)")
 
     def _render_path(self, path: str) -> str:
         """
