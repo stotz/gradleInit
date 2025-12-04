@@ -2339,7 +2339,19 @@ class ProjectGenerator:
                 if result.stdout.strip():
                     print(f"  {result.stdout.strip()}")
 
-                # Git add
+                # Git add - first force-add gradle-wrapper.jar (important for .gitignore)
+                wrapper_jar = self.target_path / 'gradle' / 'wrapper' / 'gradle-wrapper.jar'
+                if wrapper_jar.exists():
+                    print_info("Executing: git add -f gradle/wrapper/gradle-wrapper.jar")
+                    subprocess.run(
+                        ['git', 'add', '-f', 'gradle/wrapper/gradle-wrapper.jar'],
+                        cwd=self.target_path,
+                        capture_output=True,
+                        text=True,
+                        check=True
+                    )
+
+                # Git add all other files
                 print_info("Executing: git add .")
                 result = subprocess.run(
                     ['git', 'add', '.'],
