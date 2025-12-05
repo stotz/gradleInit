@@ -3084,18 +3084,22 @@ def handle_init_command(args: argparse.Namespace,
         # Prompt for gradle_version if not set
         if not args.gradle_version:
             print()
+            # Show actual default (from config or hardcoded)
+            actual_default_gradle = get_config_default(config, 'gradle_version', DEFAULT_GRADLE_VERSION)
             print_info(f"Gradle version selection:")
-            print(f"  1. Use default ({DEFAULT_GRADLE_VERSION})")
+            print(f"  1. Use default ({actual_default_gradle})")
             print(f"  2. Select from list")
             print(f"  3. Enter version manually")
             choice = input("Choice [1]: ").strip() or "1"
 
-            if choice == "2":
+            if choice == "1":
+                args.gradle_version = actual_default_gradle
+            elif choice == "2":
                 args.gradle_version = select_gradle_version_interactive()
             elif choice == "3":
-                default_gradle = get_config_default(config, 'gradle_version', DEFAULT_GRADLE_VERSION)
-                args.gradle_version = input(f"Gradle version [{default_gradle}]: ").strip() or default_gradle
-            # else: use default (will be set later)
+                args.gradle_version = input(f"Gradle version [{actual_default_gradle}]: ").strip() or actual_default_gradle
+            else:
+                args.gradle_version = actual_default_gradle
         
         # Prompt for any other template-specific variables with hints
         if metadata:
