@@ -133,7 +133,7 @@ my-app/
 - **Python 3.7+**
 - **Git** (for template cloning)
 - **Java/JDK** (to run Gradle)
-- **Gradle** (to generate Gradle wrapper)
+- **Gradle** (optional, for wrapper generation - falls back to template files if not installed)
 
 ### Install Dependencies
 

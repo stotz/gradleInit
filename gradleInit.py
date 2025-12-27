@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple, Any
 # Version & Constants
 # ============================================================================
 
-SCRIPT_VERSION = "1.6.1"
+SCRIPT_VERSION = "1.7.0"
 MODULES_REPO = "https://github.com/stotz/gradleInitModules.git"
 TEMPLATES_REPO = "https://github.com/stotz/gradleInitTemplates.git"
 MODULES_VERSION = "main"  # Use main branch (v1.3.0 tag doesn't exist yet)
@@ -988,6 +988,14 @@ class TemplateRepository:
                 print_success(f"{self.name} templates already up to date")
                 return True
 
+            # Get list of changed files before pull
+            diff_result = subprocess.run(
+                ['git', '-C', str(self.path), 'diff', '--name-only', 'HEAD..@{u}'],
+                capture_output=True,
+                text=True
+            )
+            changed_files = diff_result.stdout.strip().split('\n') if diff_result.stdout.strip() else []
+
             # Pull updates
             subprocess.run(
                 ['git', '-C', str(self.path), 'pull'],
@@ -997,6 +1005,15 @@ class TemplateRepository:
             )
 
             print_success(f"Updated {self.name} templates ({behind_count} new commits)")
+            
+            # Show changed files
+            if changed_files:
+                print_info("Changed files:")
+                for f in changed_files[:20]:  # Limit to 20 files
+                    print(f"  - {f}")
+                if len(changed_files) > 20:
+                    print(f"  ... and {len(changed_files) - 20} more")
+            
             return True
 
         except subprocess.CalledProcessError as e:
@@ -1789,6 +1806,18 @@ class DynamicCLIBuilder:
         config_parser.add_argument('--init', action='store_true',
                                    help='Initialize configuration')
 
+        # SUBPROJECT COMMAND
+        subproject_parser = subparsers.add_parser('subproject',
+                                                   help='Add a subproject to existing multi-module project')
+        subproject_parser.add_argument('name',
+                                        help='Subproject name/directory')
+        subproject_parser.add_argument('--template', '-t', required=True,
+                                        help='Template to use for subproject')
+        subproject_parser.add_argument('--group', '-g',
+                                        help='Override group ID')
+        subproject_parser.add_argument('--interactive', '-i', action='store_true',
+                                        help='Interactive mode')
+
         return parser
 
     @staticmethod
@@ -2350,12 +2379,16 @@ class ProjectGenerator:
         print_info("Running post-generation tasks...")
         print_info("*** gradleInit.py v010 - VERBOSE MODE ***")
 
-        # Generate Gradle Wrapper if build.gradle.kts or build.gradle exists
-        gradle_build = self.target_path / 'build.gradle.kts'
-        if not gradle_build.exists():
-            gradle_build = self.target_path / 'build.gradle'
+        # Generate Gradle Wrapper if this is a Gradle project
+        # Check for build.gradle.kts, build.gradle, or settings.gradle.kts
+        is_gradle_project = (
+            (self.target_path / 'build.gradle.kts').exists() or
+            (self.target_path / 'build.gradle').exists() or
+            (self.target_path / 'settings.gradle.kts').exists() or
+            (self.target_path / 'settings.gradle').exists()
+        )
 
-        if gradle_build.exists():
+        if is_gradle_project:
             self._generate_gradle_wrapper()
 
         # Initialize git repository
@@ -2421,7 +2454,109 @@ class ProjectGenerator:
 
     def _generate_gradle_wrapper(self):
         """
-        Generate Gradle Wrapper using the reliable empty-file method.
+        Generate Gradle Wrapper.
+        
+        Strategy:
+        1. If gradle is available locally: use 'gradle wrapper' command (most reliable)
+        2. If gradle is NOT available: copy wrapper files from template + generate properties
+        
+        This allows gradleInit to work even without a local Gradle installation.
+        """
+
+        # Check if wrapper already exists
+        gradlew = self.target_path / ('gradlew.bat' if IS_WINDOWS else 'gradlew')
+        if gradlew.exists():
+            print_info("Gradle Wrapper already exists")
+            return
+
+        gradle_version = self.context.get('gradle_version', DEFAULT_GRADLE_VERSION)
+        
+        # Check if gradle is available locally
+        if self._is_gradle_available():
+            self._generate_wrapper_with_gradle(gradle_version)
+        else:
+            self._generate_wrapper_from_template(gradle_version)
+
+    def _is_gradle_available(self) -> bool:
+        """Check if gradle command is available in PATH"""
+        try:
+            if IS_WINDOWS:
+                result = subprocess.run(
+                    'gradle --version',
+                    shell=True,
+                    capture_output=True,
+                    timeout=10
+                )
+            else:
+                result = subprocess.run(
+                    ['gradle', '--version'],
+                    capture_output=True,
+                    timeout=10
+                )
+            return result.returncode == 0
+        except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+            return False
+
+    def _generate_wrapper_from_template(self, gradle_version: str):
+        """
+        Generate Gradle Wrapper by copying files from template + generating properties.
+        
+        This is the fallback when gradle is not installed locally.
+        Requires: gradlew, gradlew.bat, gradle/wrapper/gradle-wrapper.jar in template.
+        """
+        print_info("Gradle not found locally - using template wrapper files")
+        
+        # Files to copy from template
+        wrapper_files = [
+            'gradlew',
+            'gradlew.bat',
+            Path('gradle') / 'wrapper' / 'gradle-wrapper.jar'
+        ]
+        
+        missing_files = []
+        for f in wrapper_files:
+            source = self.template_path / f
+            if not source.exists():
+                missing_files.append(str(f))
+        
+        if missing_files:
+            print_warning("Template missing wrapper files:")
+            for f in missing_files:
+                print(f"  - {f}")
+            print_info("Add these files to your template from any existing Gradle project.")
+            print_info(f"Or install Gradle and run: gradle wrapper --gradle-version {gradle_version}")
+            return
+        
+        # Copy wrapper files from template
+        for f in wrapper_files:
+            source = self.template_path / f
+            target = self.target_path / f
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+            print_info(f"  Copied: {f}")
+        
+        # Make gradlew executable
+        gradlew_path = self.target_path / 'gradlew'
+        if gradlew_path.exists():
+            gradlew_path.chmod(gradlew_path.stat().st_mode | 0o111)
+        
+        # Generate gradle-wrapper.properties
+        properties_path = self.target_path / 'gradle' / 'wrapper' / 'gradle-wrapper.properties'
+        properties_content = f"""distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionUrl=https\\://services.gradle.org/distributions/gradle-{gradle_version}-bin.zip
+networkTimeout=10000
+validateDistributionUrl=true
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+"""
+        properties_path.write_text(properties_content)
+        print_info(f"  Generated: gradle/wrapper/gradle-wrapper.properties")
+        print_success(f"Gradle Wrapper {gradle_version} configured (from template)")
+
+    def _generate_wrapper_with_gradle(self, gradle_version: str):
+        """
+        Generate Gradle Wrapper using local gradle installation.
 
         This method:
         1. Creates empty build.gradle.kts and settings.gradle.kts
@@ -2431,13 +2566,8 @@ class ProjectGenerator:
 
         This avoids Constructor errors from incomplete/complex build files.
         """
-
-        # Check if wrapper already exists
-        gradlew = self.target_path / ('gradlew.bat' if IS_WINDOWS else 'gradlew')
-        if gradlew.exists():
-            print_info("Gradle Wrapper already exists")
-            return
-
+        print_info("Using local Gradle installation")
+        
         build_file = self.target_path / 'build.gradle.kts'
         settings_file = self.target_path / 'settings.gradle.kts'
 
@@ -2450,9 +2580,6 @@ class ProjectGenerator:
         settings_content = settings_file.read_text() if settings_existed else None
 
         try:
-            # Get Gradle version from context (fallback to default)
-            gradle_version = self.context.get('gradle_version', DEFAULT_GRADLE_VERSION)
-
             # Step 1: Create empty placeholder files
             if not build_existed:
                 build_file.touch()
@@ -2542,7 +2669,6 @@ class ProjectGenerator:
         except FileNotFoundError as e:
             print_warning(f"Gradle not found in PATH: {e}")
             print_info("  Install Gradle: https://gradle.org/install/")
-            gradle_version = self.context.get('gradle_version', DEFAULT_GRADLE_VERSION)
             print_info(f"  Or run manually: gradle wrapper --gradle-version {gradle_version}")
 
             # Restore original files on error
@@ -2553,7 +2679,6 @@ class ProjectGenerator:
 
         except subprocess.TimeoutExpired:
             print_warning("Gradle wrapper generation timed out (60s)")
-            gradle_version = self.context.get('gradle_version', DEFAULT_GRADLE_VERSION)
             print_info(f"  You can run manually: gradle wrapper --gradle-version {gradle_version}")
 
             # Restore original files on error
@@ -2572,6 +2697,375 @@ class ProjectGenerator:
                 build_file.write_text(build_content)
             if settings_existed and settings_content:
                 settings_file.write_text(settings_content)
+
+
+# ============================================================================
+# Subproject Generator
+# ============================================================================
+
+class SubprojectGenerator:
+    """
+    Generate a subproject within an existing multi-module Gradle project.
+    
+    Unlike ProjectGenerator, this:
+    - Skips files defined in subproject_mode.skip
+    - Uses alternative build file (build.gradle.kts.subproject)
+    - Merges versions into root libs.versions.toml
+    - Updates settings.gradle.kts with include()
+    - Only runs git add (no commit)
+    """
+
+    def __init__(self,
+                 template_path: Path,
+                 template_metadata: TemplateMetadata,
+                 context: Dict[str, Any],
+                 root_path: Path,
+                 subproject_name: str):
+        """
+        Initialize subproject generator.
+        
+        Args:
+            template_path: Path to template directory
+            template_metadata: Template metadata with subproject_mode config
+            context: Rendering context
+            root_path: Root project path (where settings.gradle.kts is)
+            subproject_name: Name of the subproject directory
+        """
+        self.template_path = template_path
+        self.template_metadata = template_metadata
+        self.context = context
+        self.root_path = root_path
+        self.subproject_name = subproject_name
+        self.target_path = root_path / subproject_name
+        self.jinja_env = setup_jinja2_environment(template_path, context)
+        
+        # Get subproject_mode config
+        self.subproject_config = template_metadata.metadata.get('subproject_mode', {})
+        self.skip_patterns = set(self.subproject_config.get('skip', []))
+        self.build_file = self.subproject_config.get('build_file')
+        self.merge_versions_file = self.subproject_config.get('merge_versions')
+
+    def generate(self) -> bool:
+        """
+        Generate subproject.
+        
+        Returns:
+            True if successful
+        """
+        try:
+            # Check if subproject_mode is supported
+            if not self.subproject_config:
+                print_error(f"Template does not support subproject mode")
+                return False
+            
+            # Check if target already exists
+            if self.target_path.exists():
+                print_error(f"Directory already exists: {self.target_path}")
+                return False
+            
+            # Create target directory
+            self.target_path.mkdir(parents=True, exist_ok=True)
+            
+            print_info("Processing template files...")
+            
+            # Process template files (with skip logic)
+            self._process_directory(self.template_path, self.target_path)
+            
+            # Handle alternative build file
+            if self.build_file:
+                self._process_build_file()
+            
+            # Merge versions if specified
+            if self.merge_versions_file:
+                self._merge_versions()
+            
+            # Update settings.gradle.kts
+            self._update_settings()
+            
+            # Git add
+            self._git_add()
+            
+            print_success(f"Subproject '{self.subproject_name}' added")
+            print_info("Run 'git status' to review, then commit when ready")
+            
+            return True
+            
+        except Exception as e:
+            print_error(f"Failed to create subproject: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def _should_skip(self, rel_path: str) -> bool:
+        """Check if file/directory should be skipped"""
+        for pattern in self.skip_patterns:
+            if pattern.endswith('/'):
+                # Directory pattern
+                if rel_path.startswith(pattern) or rel_path + '/' == pattern:
+                    return True
+            else:
+                # File pattern
+                if rel_path == pattern or Path(rel_path).name == pattern:
+                    return True
+        return False
+
+    def _process_directory(self, source_dir: Path, target_dir: Path):
+        """Process directory recursively"""
+        for item in source_dir.iterdir():
+            rel_path = str(item.relative_to(self.template_path))
+            
+            # Skip patterns
+            if self._should_skip(rel_path):
+                continue
+            
+            # Skip TEMPLATE.md and build file alternative
+            if item.name in ('TEMPLATE.md', self.build_file):
+                continue
+            
+            # Skip original build.gradle.kts if we have an alternative
+            if item.name == 'build.gradle.kts' and self.build_file:
+                continue
+            
+            # Skip raw_copy files that are in skip list
+            raw_copy = self.template_metadata.get_raw_copy_files()
+            if item.name in raw_copy and self._should_skip(item.name):
+                continue
+            
+            target_item = target_dir / item.name
+            
+            if item.is_dir():
+                target_item.mkdir(parents=True, exist_ok=True)
+                self._process_directory(item, target_item)
+            else:
+                self._process_file(item, target_item)
+
+    def _process_file(self, source_file: Path, target_file: Path):
+        """Process single file"""
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Check for raw copy
+        raw_copy = self.template_metadata.get_raw_copy_files()
+        if source_file.name in raw_copy:
+            shutil.copy2(source_file, target_file)
+            rel_path = source_file.relative_to(self.template_path)
+            print_info(f"  [OK] {rel_path} (raw)")
+            return
+        
+        # Render template
+        try:
+            if self.template_metadata:
+                compiled_content = self.template_metadata.compile_template_file(source_file)
+                template = self.jinja_env.from_string(compiled_content)
+            else:
+                rel_path = str(source_file.relative_to(self.template_path)).replace('\\', '/')
+                template = self.jinja_env.get_template(rel_path)
+            
+            content = template.render(**self.context)
+            target_file.write_text(content, encoding='utf-8')
+            
+            rel_path = source_file.relative_to(self.template_path)
+            print_info(f"  [OK] {rel_path}")
+            
+        except Exception as e:
+            print_error(f"Error rendering {source_file.name}: {e}")
+            raise
+
+    def _process_build_file(self):
+        """Process alternative build file"""
+        source_file = self.template_path / self.build_file
+        target_file = self.target_path / 'build.gradle.kts'
+        
+        if not source_file.exists():
+            print_warning(f"Build file not found: {self.build_file}")
+            return
+        
+        try:
+            compiled_content = self.template_metadata.compile_template_file(source_file)
+            template = self.jinja_env.from_string(compiled_content)
+            content = template.render(**self.context)
+            target_file.write_text(content, encoding='utf-8')
+            print_info(f"  [OK] build.gradle.kts (from {self.build_file})")
+        except Exception as e:
+            print_error(f"Error rendering {self.build_file}: {e}")
+            raise
+
+    def _merge_versions(self):
+        """Merge template versions into root libs.versions.toml"""
+        template_versions = self.template_path / self.merge_versions_file
+        root_versions = self.root_path / 'gradle' / 'libs.versions.toml'
+        
+        if not template_versions.exists():
+            print_warning(f"Template versions file not found: {self.merge_versions_file}")
+            return
+        
+        if not root_versions.exists():
+            print_warning("Root libs.versions.toml not found")
+            return
+        
+        try:
+            # Read and RENDER template content (resolve {{ variables }})
+            template_raw = template_versions.read_text(encoding='utf-8')
+            
+            # Compile template to remove hints, then render
+            if self.template_metadata:
+                # Remove inline hints using the pattern directly
+                import re
+                ENHANCED_PATTERN = re.compile(
+                    r'\{\{\s*@@'
+                    r'(\d+)?'           # sort order (optional)
+                    r'\|?'              # separator
+                    r'(?:\(([^)]*)\))?'  # regex pattern (optional)
+                    r'\|?'              # separator
+                    r'([^=@]*)?'        # help text (optional)
+                    r'(?:=([^@]*))?'    # default value (optional)
+                    r'@@'
+                    r'(\w+)'            # variable name
+                    r'\s*\}\}',
+                    re.DOTALL
+                )
+                
+                def replace_enhanced(match):
+                    var_name = match.group(5)  # variable name is group 5
+                    return '{{ ' + var_name + ' }}'
+                
+                compiled = ENHANCED_PATTERN.sub(replace_enhanced, template_raw)
+                
+                # Render Jinja2 variables
+                jinja_template = self.jinja_env.from_string(compiled)
+                template_content = jinja_template.render(**self.context)
+            else:
+                template_content = template_raw
+            
+            root_content = root_versions.read_text(encoding='utf-8')
+            
+            # Simple merge: find new entries and append
+            merged = self._merge_toml_content(root_content, template_content)
+            
+            if merged != root_content:
+                root_versions.write_text(merged, encoding='utf-8')
+                print_info("  [OK] Merged versions into gradle/libs.versions.toml")
+            else:
+                print_info("  [--] No new versions to merge")
+                
+        except Exception as e:
+            print_warning(f"Could not merge versions: {e}")
+
+    def _merge_toml_content(self, root: str, template: str) -> str:
+        """
+        Merge TOML content (simple implementation).
+        
+        Adds entries from template that don't exist in root.
+        """
+        # Parse into sections
+        def parse_sections(content: str) -> Dict[str, Dict[str, str]]:
+            sections = {}
+            current_section = None
+            for line in content.split('\n'):
+                line = line.strip()
+                if line.startswith('[') and line.endswith(']'):
+                    current_section = line[1:-1]
+                    sections[current_section] = {}
+                elif '=' in line and current_section:
+                    key = line.split('=')[0].strip()
+                    sections[current_section][key] = line
+            return sections
+        
+        root_sections = parse_sections(root)
+        template_sections = parse_sections(template)
+        
+        # Find new entries
+        additions = {}
+        for section, entries in template_sections.items():
+            if section not in additions:
+                additions[section] = []
+            for key, line in entries.items():
+                if section not in root_sections or key not in root_sections[section]:
+                    additions[section].append(line)
+        
+        # Append new entries to root
+        result = root.rstrip()
+        for section, entries in additions.items():
+            if entries:
+                # Find or create section
+                section_header = f'[{section}]'
+                if section_header in result:
+                    # Append to existing section
+                    lines = result.split('\n')
+                    new_lines = []
+                    in_section = False
+                    added = False
+                    for i, line in enumerate(lines):
+                        new_lines.append(line)
+                        if line.strip() == section_header:
+                            in_section = True
+                        elif in_section and (line.startswith('[') or i == len(lines) - 1):
+                            # End of section, insert entries
+                            if not added:
+                                for entry in entries:
+                                    new_lines.insert(-1, entry)
+                                added = True
+                            in_section = False
+                    if not added:
+                        for entry in entries:
+                            new_lines.append(entry)
+                    result = '\n'.join(new_lines)
+                else:
+                    # Create new section
+                    result += f'\n\n{section_header}\n'
+                    for entry in entries:
+                        result += f'{entry}\n'
+        
+        return result
+
+    def _update_settings(self):
+        """Update settings.gradle.kts with include()"""
+        settings_file = self.root_path / 'settings.gradle.kts'
+        
+        if not settings_file.exists():
+            print_warning("settings.gradle.kts not found")
+            return
+        
+        content = settings_file.read_text(encoding='utf-8')
+        include_line = f'include("{self.subproject_name}")'
+        
+        if include_line in content:
+            print_info(f"  [--] {self.subproject_name} already in settings.gradle.kts")
+            return
+        
+        # Add include at end of file
+        if not content.endswith('\n'):
+            content += '\n'
+        content += f'{include_line}\n'
+        
+        settings_file.write_text(content, encoding='utf-8')
+        print_info(f"  [OK] Added include(\"{self.subproject_name}\") to settings.gradle.kts")
+
+    def _git_add(self):
+        """Run git add"""
+        try:
+            # Check if in git repo
+            result = subprocess.run(
+                ['git', 'rev-parse', '--is-inside-work-tree'],
+                cwd=self.root_path,
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode != 0:
+                print_info("Not in a git repository - skipping git add")
+                return
+            
+            # Git add
+            subprocess.run(
+                ['git', 'add', '.'],
+                cwd=self.root_path,
+                capture_output=True,
+                text=True
+            )
+            print_info("  [OK] git add .")
+            
+        except FileNotFoundError:
+            print_info("Git not available - skipping git add")
 
 
 # ============================================================================
@@ -2908,6 +3402,137 @@ def validate_cli_args_against_template(args: Dict[str, Any],
             errors.append(f"Argument '--{hint.name}': {error_msg}")
     
     return len(errors) == 0, errors
+
+
+def find_gradle_root(start_path: Path = None) -> Optional[Path]:
+    """
+    Find the root of a Gradle project by looking for settings.gradle.kts.
+    
+    Args:
+        start_path: Starting directory (defaults to current directory)
+    
+    Returns:
+        Path to project root, or None if not found
+    """
+    if start_path is None:
+        start_path = Path.cwd()
+    
+    current = start_path.resolve()
+    
+    while current != current.parent:
+        settings = current / 'settings.gradle.kts'
+        if settings.exists():
+            return current
+        current = current.parent
+    
+    return None
+
+
+def handle_subproject_command(args: argparse.Namespace,
+                               paths: GradleInitPaths,
+                               repo_manager: TemplateRepositoryManager) -> int:
+    """
+    Handle subproject command - Add a subproject to existing multi-module project.
+    
+    Args:
+        args: Parsed arguments
+        paths: GradleInit paths
+        repo_manager: Template repository manager
+    
+    Returns:
+        Exit code (0 for success)
+    """
+    # Find Gradle root
+    root_path = find_gradle_root()
+    if not root_path:
+        print_error("Not in a Gradle project (no settings.gradle.kts found)")
+        print_info("Run this command from within an existing Gradle project")
+        return 1
+    
+    print_info(f"Gradle project root: {root_path}")
+    
+    # Find template
+    template_path = repo_manager.find_template(args.template)
+    if not template_path:
+        print_error(f"Template not found: {args.template}")
+        print_info("Available templates:")
+        for name, tmpl_path in repo_manager.list_templates():
+            print(f"  - {name}")
+        return 1
+    
+    # Load template metadata
+    metadata = TemplateMetadata(template_path, paths.compiled_templates)
+    
+    # Check if template supports subproject mode
+    subproject_config = metadata.metadata.get('subproject_mode')
+    if not subproject_config:
+        print_error(f"Template '{args.template}' does not support subproject mode")
+        print_info("Only templates with 'subproject_mode' in TEMPLATE.md can be used")
+        return 1
+    
+    # Load config
+    config = load_config(paths.config_file)
+    
+    # Build context
+    context = {}
+    
+    # Add defaults from config
+    if 'defaults' in config:
+        context.update(config['defaults'])
+    if 'custom' in config:
+        context.update(config['custom'])
+    
+    # Override with CLI args
+    if args.group:
+        context['group'] = args.group
+    
+    # Set project_name to subproject name
+    context['project_name'] = args.name
+    
+    # Get template hints and set defaults for all variables
+    hints = metadata.get_template_hints()
+    for hint in hints:
+        if hint.name not in context and hint.default_value:
+            context[hint.name] = hint.default_value
+    
+    # Interactive prompts for template variables
+    if args.interactive:
+        for hint in hints:
+            if hint.name in ['project_name']:
+                continue
+            current_value = context.get(hint.name, hint.default_value)
+            prompted = prompt_with_validation(
+                hint.help_text or hint.name,
+                current_value,
+                hint,
+                allow_empty=True
+            )
+            if prompted:
+                context[hint.name] = prompted
+    
+    # Print summary
+    print()
+    print("=" * 70)
+    print(f"  Adding Subproject: {args.name}")
+    print("=" * 70)
+    print_info(f"Template: {args.template}")
+    print_info(f"Root project: {root_path}")
+    print_info(f"Target directory: {root_path / args.name}")
+    print()
+    
+    # Create subproject
+    generator = SubprojectGenerator(
+        template_path=template_path,
+        template_metadata=metadata,
+        context=context,
+        root_path=root_path,
+        subproject_name=args.name
+    )
+    
+    if generator.generate():
+        return 0
+    else:
+        return 1
 
 
 def handle_init_command(args: argparse.Namespace,
@@ -3435,6 +4060,9 @@ def main():
 
     elif args.command == 'config':
         return handle_config_command(args, paths)
+
+    elif args.command == 'subproject':
+        return handle_subproject_command(args, paths, repo_manager)
 
     elif args.command == 'init':
         return handle_init_command(args, paths, repo_manager)
