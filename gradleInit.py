@@ -2439,6 +2439,25 @@ class ProjectGenerator:
                     check=True
                 )
 
+                # Set executable flag for scripts (Windows doesn't set this automatically)
+                # Find all script files that should be executable
+                executable_files = ['gradlew']
+                executable_patterns = ['*.sh', '*.py', '*.pl', '*.rb', '*.bash', '*.zsh']
+                
+                for pattern in executable_patterns:
+                    for script_file in self.target_path.rglob(pattern):
+                        executable_files.append(str(script_file.relative_to(self.target_path)))
+                
+                for script in executable_files:
+                    script_path = self.target_path / script
+                    if script_path.exists():
+                        subprocess.run(
+                            ['git', 'update-index', '--chmod=+x', script],
+                            cwd=self.target_path,
+                            capture_output=True,
+                            text=True
+                        )
+
                 # Git commit
                 print_info("Executing: git commit -m 'Initial commit from gradleInit'")
                 result = subprocess.run(
