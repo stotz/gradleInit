@@ -2429,6 +2429,16 @@ class ProjectGenerator:
                     check=True
                 )
 
+                # Renormalize line endings (applies .gitattributes)
+                print_info("Executing: git add --renormalize .")
+                result = subprocess.run(
+                    ['git', 'add', '--renormalize', '.'],
+                    cwd=self.target_path,
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+
                 # Git commit
                 print_info("Executing: git commit -m 'Initial commit from gradleInit'")
                 result = subprocess.run(
