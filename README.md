@@ -4,6 +4,7 @@ A single-file Python tool for creating Kotlin/Gradle projects. Supports template
 
 [![Version](https://img.shields.io/badge/version-1.7.0-blue.svg)](https://github.com/stotz/gradleInit)
 [![Python](https://img.shields.io/badge/python-3.7+-green.svg)](https://www.python.org/)
+[![Gradle](https://img.shields.io/badge/gradle-8+-02303A.svg?logo=gradle&logoColor=white)](https://gradle.org/)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 
 ---
