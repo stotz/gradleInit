@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Quick test with local templates"""
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -7,6 +8,21 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from gradleInit import TemplateMetadata, ProjectGenerator
+
+
+def get_system_java_version() -> str:
+    """Detect the Java version available on the system."""
+    try:
+        result = subprocess.run(['java', '-version'], capture_output=True, text=True)
+        output = result.stderr or result.stdout
+        import re
+        match = re.search(r'version "(\d+)', output)
+        if match:
+            return match.group(1)
+    except Exception:
+        pass
+    return '21'
+
 
 def test():
     # Use ~/.gradleInit/templates/official/kotlin-single if available
@@ -42,8 +58,8 @@ def test():
             'version': '1.0.0',
             'kotlin_version': '2.2.0',
             'gradle_version': '9.0',
-            'jdk_version': '21',
-            'vendor': 'Test Vendor'
+            'jdk_version': get_system_java_version(),
+            'company': 'Test Company'
         }
         
         generator = ProjectGenerator(template_path, context, project_path, metadata)

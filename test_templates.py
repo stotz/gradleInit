@@ -298,8 +298,14 @@ class TestTemplateStructure(TemplateTestBase):
         """Test that all templates have src/main/kotlin structure"""
         for name, template_dir in self.templates.items():
             with self.subTest(template=name):
+                # multiproject-root is a container template without src
+                if name == 'multiproject-root':
+                    # multiproject-root only has buildSrc, no src/main/kotlin
+                    buildSrc = template_dir / 'buildSrc'
+                    self.assertTrue(buildSrc.exists(),
+                                  f"{name}: Missing buildSrc directory")
                 # For multi-module templates, check if any submodule has the structure
-                if name == 'kotlin-multi':
+                elif name == 'kotlin-multi':
                     # Multi-module templates have src in submodules
                     has_src = any(
                         (template_dir / subdir / 'src' / 'main' / 'kotlin').exists()

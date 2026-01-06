@@ -1014,6 +1014,25 @@ class TemplateRepository:
                 if len(changed_files) > 20:
                     print(f"  ... and {len(changed_files) - 20} more")
             
+            # Clear compiled template cache for templates in this repository
+            # Git pull doesn't update file mtimes reliably, so we clear the cache
+            # to ensure templates are recompiled with the latest content
+            # Cache is organized by template name, not repository name
+            compiled_cache_base = self.path.parent.parent / 'cache' / 'compiled'
+            if compiled_cache_base.exists():
+                cleared = False
+                for template_dir in self.path.iterdir():
+                    if template_dir.is_dir() and not template_dir.name.startswith('.'):
+                        template_cache = compiled_cache_base / template_dir.name
+                        if template_cache.exists():
+                            try:
+                                shutil.rmtree(template_cache)
+                                cleared = True
+                            except OSError:
+                                pass
+                if cleared:
+                    print_info("Cleared compiled template cache")
+            
             return True
 
         except subprocess.CalledProcessError as e:
@@ -1794,6 +1813,8 @@ class DynamicCLIBuilder:
                                       help='Show template info')
         templates_parser.add_argument('--update', action='store_true',
                                       help='Update repositories')
+        templates_parser.add_argument('--clear-cache', action='store_true',
+                                      help='Clear compiled template cache')
         templates_parser.add_argument('--add-repo', nargs=2,
                                       metavar=('NAME', 'URL'),
                                       help='Add custom repository')
@@ -3196,6 +3217,23 @@ def handle_templates_command(args: argparse.Namespace,
             print()
             print_success("official templates cloned successfully")
 
+        return 0
+
+    if getattr(args, 'clear_cache', False):
+        print_header("Clearing Template Cache")
+        
+        compiled_cache = repo_manager.paths.compiled_templates
+        if compiled_cache.exists():
+            try:
+                shutil.rmtree(compiled_cache)
+                compiled_cache.mkdir(parents=True, exist_ok=True)
+                print_success("Compiled template cache cleared")
+            except OSError as e:
+                print_error(f"Failed to clear cache: {e}")
+                return 1
+        else:
+            print_info("No cache to clear")
+        
         return 0
 
     if args.info:

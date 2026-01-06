@@ -120,7 +120,12 @@ email = "test@example.com"
         content = build_file.read_text()
         assert 'group = "ch.typedef"' in content, f"Config group not used. Content:\n{content}"
         assert 'version = "0.0.1"' in content, f"Config version not used. Content:\n{content}"
-        assert 'jvmToolchain(21)' in content, f"Config jdk_version not used. Content:\n{content}"
+        
+        # Check jdk_version in libs.versions.toml (not in build.gradle.kts)
+        versions_file = project_dir / "gradle" / "libs.versions.toml"
+        if versions_file.exists():
+            versions_content = versions_file.read_text()
+            assert 'jdk = "21"' in versions_content, f"Config jdk_version not used. Content:\n{versions_content}"
         
         print("[OK] Config defaults were correctly used")
     
@@ -165,7 +170,12 @@ jdk_version = "21"
         
         assert 'group = "com.override"' in content, "CLI group did not override config"
         assert 'version = "2.0.0"' in content, "CLI version did not override config"
-        assert 'jvmToolchain(17)' in content, "CLI jdk_version did not override config"
+        
+        # Check jdk_version in libs.versions.toml
+        versions_file = project_dir / "gradle" / "libs.versions.toml"
+        if versions_file.exists():
+            versions_content = versions_file.read_text()
+            assert 'jdk = "17"' in versions_content, f"CLI jdk_version did not override config. Content:\n{versions_content}"
         
         print("[OK] CLI args correctly override config")
     

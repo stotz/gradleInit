@@ -2,6 +2,7 @@
 """
 Quick test to verify template compilation with real templates
 """
+import subprocess
 import sys
 import tempfile
 import shutil
@@ -9,7 +10,22 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from gradleInit import TemplateMetadata, ProjectGenerator, TemplateRepository
+from gradleInit import TemplateMetadata, ProjectGenerator
+
+
+def get_system_java_version() -> str:
+    """Detect the Java version available on the system."""
+    try:
+        result = subprocess.run(['java', '-version'], capture_output=True, text=True)
+        output = result.stderr or result.stdout
+        import re
+        match = re.search(r'version "(\d+)', output)
+        if match:
+            return match.group(1)
+    except Exception:
+        pass
+    return '21'
+
 
 def test_real_template_compilation():
     """Test compilation with actual kotlin-single template"""
@@ -17,14 +33,16 @@ def test_real_template_compilation():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
         
-        # Clone templates
-        templates_dir = tmpdir / "templates"
-        repo = TemplateRepository('test', templates_dir, 'https://github.com/stotz/gradleInitTemplates.git')
+        # Use local templates
+        home = Path.home()
+        templates_dir = home / ".gradleInit" / "templates" / "official"
         
-        print("Cloning templates...")
-        if not repo.clone():
-            print("[FAIL] Could not clone templates")
+        if not templates_dir.exists():
+            print(f"[FAIL] Local templates not found at {templates_dir}")
+            print("       Run 'gradleInit templates --update' first")
             return False
+        
+        print(f"[OK] Using local templates from {templates_dir}")
         
         template_path = templates_dir / 'kotlin-single'
         if not template_path.exists():
@@ -76,8 +94,8 @@ def test_real_template_compilation():
             'version': '1.0.0',
             'kotlin_version': '2.2.0',
             'gradle_version': '9.0',
-            'jdk_version': '21',
-            'vendor': 'Test Vendor'
+            'jdk_version': get_system_java_version(),
+            'company': 'Test Company'
         }
         
         generator = ProjectGenerator(template_path, context, project_path, metadata)

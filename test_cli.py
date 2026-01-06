@@ -292,7 +292,7 @@ class TestInitCommand(unittest.TestCase):
             'init', project_name,
             '--template', 'kotlin-single',
             '--group', 'com.test',
-            '--version', '2.0.0',
+            '--project-version', '2.0.0',
         ], cwd=self.projects_dir)
 
         self.assertEqual(result.returncode, 0)
