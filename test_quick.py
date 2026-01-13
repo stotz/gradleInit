@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from gradleInit import TemplateMetadata, ProjectGenerator
+from gradleInit import TemplateMetadata, ProjectGenerator, DEFAULT_GRADLE_VERSION, DEFAULT_KOTLIN_VERSION
 
 
 def get_system_java_version() -> str:
@@ -56,8 +56,8 @@ def test():
             'project_name': 'test-project',
             'group': 'com.test',
             'version': '1.0.0',
-            'kotlin_version': '2.2.0',
-            'gradle_version': '9.0',
+            'kotlin_version': DEFAULT_KOTLIN_VERSION,
+            'gradle_version': DEFAULT_GRADLE_VERSION,
             'jdk_version': get_system_java_version(),
             'company': 'Test Company'
         }

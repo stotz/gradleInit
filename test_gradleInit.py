@@ -48,6 +48,8 @@ try:
     ContextBuilder = gradleInit.ContextBuilder
     ProjectGenerator = gradleInit.ProjectGenerator
     parse_github_url = gradleInit.parse_github_url
+    DEFAULT_GRADLE_VERSION = gradleInit.DEFAULT_GRADLE_VERSION
+    DEFAULT_KOTLIN_VERSION = gradleInit.DEFAULT_KOTLIN_VERSION
 
 except ImportError as e:
     print(f"Error importing gradleInit: {e}")
@@ -198,8 +200,8 @@ class TestTemplateGeneration(unittest.TestCase):
             'project_name': project_name,
             'group': 'com.test',
             'version': '1.0.0',
-            'kotlin_version': '2.2.0',
-            'gradle_version': '9.0',
+            'kotlin_version': DEFAULT_KOTLIN_VERSION,
+            'gradle_version': DEFAULT_GRADLE_VERSION,
             'jdk_version': SYSTEM_JAVA_VERSION,
             'company': 'Test Company',
             'spring_boot_version': '4.0.0',
@@ -785,7 +787,7 @@ class TestPerformance(unittest.TestCase):
                 'project_name': 'test-project',
                 'group': 'com.test',
                 'version': '1.0.0',
-                'kotlin_version': '2.2.0',
+                'kotlin_version': DEFAULT_KOTLIN_VERSION,
                 'jdk_version': SYSTEM_JAVA_VERSION,
                 'company': 'Test Company',
                 'date': '2025-11-15'

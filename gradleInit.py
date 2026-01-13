@@ -43,8 +43,9 @@ IS_WINDOWS = sys.platform.startswith('win')
 SCOOP_DIR = os.environ.get('SCOOP')
 SCOOP_SHIMS_DIR = os.path.join(SCOOP_DIR, 'shims') if SCOOP_DIR else None
 
-# Default Gradle version
-DEFAULT_GRADLE_VERSION = "8.14"
+# Default versions
+DEFAULT_GRADLE_VERSION = "9.2.1"
+DEFAULT_KOTLIN_VERSION = "2.2.20"
 GRADLE_VERSIONS_URL = "https://services.gradle.org/versions/all"
 
 
@@ -570,8 +571,8 @@ class GradleInitPaths:
             'defaults': {
                 'group': 'com.example',
                 'version': '0.1.0',
-                'gradle_version': '8.11',
-                'kotlin_version': '2.1.0',
+                'gradle_version': DEFAULT_GRADLE_VERSION,
+                'kotlin_version': DEFAULT_KOTLIN_VERSION,
                 'jdk_version': '21'
             },
             'custom': {
