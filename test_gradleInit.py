@@ -48,41 +48,10 @@ try:
     ContextBuilder = gradleInit.ContextBuilder
     ProjectGenerator = gradleInit.ProjectGenerator
     parse_github_url = gradleInit.parse_github_url
-    DEFAULT_GRADLE_VERSION = gradleInit.DEFAULT_GRADLE_VERSION
-    DEFAULT_KOTLIN_VERSION = gradleInit.DEFAULT_KOTLIN_VERSION
 
 except ImportError as e:
     print(f"Error importing gradleInit: {e}")
     sys.exit(1)
-
-
-def get_system_java_version() -> int:
-    """
-    Detect the Java version available on the system.
-    
-    Returns:
-        Java major version (e.g., 21, 23) or 21 as fallback
-    """
-    try:
-        result = subprocess.run(
-            ['java', '-version'],
-            capture_output=True,
-            text=True
-        )
-        # Java version is in stderr
-        output = result.stderr or result.stdout
-        # Parse version from output like 'openjdk version "23.0.2"'
-        import re
-        match = re.search(r'version "(\d+)', output)
-        if match:
-            return int(match.group(1))
-    except Exception:
-        pass
-    return 21  # Fallback
-
-
-# Detect system Java version once at module load
-SYSTEM_JAVA_VERSION = get_system_java_version()
 
 
 # ============================================================================
@@ -140,25 +109,44 @@ class TestTemplateGeneration(unittest.TestCase):
     def setUpClass(cls):
         """Setup test environment once"""
         cls.test_root = Path(tempfile.mkdtemp(prefix="gradleInit_test_"))
+        cls.templates_dir = cls.test_root / "templates"
         cls.projects_dir = cls.test_root / "projects"
         cls.projects_dir.mkdir()
 
-        # Use local templates from ~/.gradleInit/templates/official/
-        # This ensures tests use the same templates as the user
-        home = Path.home()
-        cls.templates_dir = home / ".gradleInit" / "templates" / "official"
-        
-        if not cls.templates_dir.exists():
-            print(f"\n[WARN] Local templates not found at {cls.templates_dir}")
-            print("       Run 'gradleInit templates --update' first")
-            raise RuntimeError(f"Templates not found. Run: gradleInit templates --update")
-        
-        print(f"\n[OK] Using local templates from {cls.templates_dir}")
-        
-        # List available templates
-        templates = [d.name for d in cls.templates_dir.iterdir() 
-                    if d.is_dir() and not d.name.startswith('.')]
-        print(f"[OK] Found {len(templates)} templates: {', '.join(sorted(templates))}")
+        # Always get fresh templates from GitHub
+        print("\nFetching latest templates from GitHub...")
+
+        # Remove templates dir if it exists to ensure fresh clone
+        if cls.templates_dir.exists():
+            shutil.rmtree(cls.templates_dir)
+
+        cls.templates_dir.mkdir()
+
+        # Clone templates from GitHub
+        result = subprocess.run(
+            ['git', 'clone', '--depth', '1',
+             'https://github.com/stotz/gradleInitTemplates.git',
+             str(cls.templates_dir)],
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to clone templates: {result.stderr}")
+
+        print(f"[OK] Templates cloned to {cls.templates_dir}")
+
+        # Verify we got the fixed templates
+        settings_file = cls.templates_dir / "kotlin-single" / "settings.gradle.kts"
+        if settings_file.exists():
+            content = settings_file.read_text()
+            if "pluginManagement" in content and "layout.projectDirectory.file" in content:
+                print("[OK] Verified: Templates contain latest fixes")
+            else:
+                print("[WARN] Warning: Templates may not have latest fixes!")
+                print(f"  First 200 chars: {content[:200]}")
+        else:
+            print(f"[WARN] Warning: settings.gradle.kts not found at {settings_file}")
 
     @classmethod
     def tearDownClass(cls):
@@ -194,17 +182,15 @@ class TestTemplateGeneration(unittest.TestCase):
         if project_path.exists():
             shutil.rmtree(project_path)
 
-        # Build context with all required variables
-        # Use system Java version for toolchain compatibility
+        # Build context
         context = {
             'project_name': project_name,
             'group': 'com.test',
             'version': '1.0.0',
-            'kotlin_version': DEFAULT_KOTLIN_VERSION,
-            'gradle_version': DEFAULT_GRADLE_VERSION,
-            'jdk_version': SYSTEM_JAVA_VERSION,
-            'company': 'Test Company',
-            'spring_boot_version': '4.0.0',
+            'kotlin_version': '2.2.0',
+            'gradle_version': '9.0',
+            'jdk_version': 21,
+            'vendor': 'Test Vendor',
             'date': '2025-11-15',
             **kwargs
         }
@@ -597,16 +583,16 @@ Formatted: {{ now().strftime('%Y-%m-%d') }}
 """)
             
             # Generate
-            output_dir = Path(temp_dir) / "output"
-            output_dir.mkdir(parents=True, exist_ok=True)
+            paths = GradleInitPaths(temp_dir)
             context = {
                 'project_name': 'test',
                 'group': 'com.test',
                 'version': '1.0.0'
             }
             
-            gen = ProjectGenerator(template_dir, context, output_dir)
-            gen._render_text_file(test_file, output_dir / "test.txt")
+            gen = ProjectGenerator(template_dir, paths, context)
+            output_dir = Path(temp_dir) / "output"
+            gen._render_file(test_file, output_dir / "test.txt", context)
             
             # Verify
             result = (output_dir / "test.txt").read_text()
@@ -631,16 +617,16 @@ Missing: {{ env('MISSING_VAR', 'default') }}
 """)
             
             # Generate
-            output_dir = Path(temp_dir) / "output"
-            output_dir.mkdir(parents=True, exist_ok=True)
+            paths = GradleInitPaths(temp_dir)
             context = {
                 'project_name': 'test',
                 'group': 'com.test',
                 'version': '1.0.0'
             }
             
-            gen = ProjectGenerator(template_dir, context, output_dir)
-            gen._render_text_file(test_file, output_dir / "test.txt")
+            gen = ProjectGenerator(template_dir, paths, context)
+            output_dir = Path(temp_dir) / "output"
+            gen._render_file(test_file, output_dir / "test.txt", context)
             
             # Verify
             result = (output_dir / "test.txt").read_text()
@@ -666,18 +652,16 @@ Custom: {{ timestamp | datetime('%Y/%m/%d') }}
 """)
             
             # Generate
-            output_dir = Path(temp_dir) / "output"
-            output_dir.mkdir(parents=True, exist_ok=True)
-            from datetime import datetime
+            paths = GradleInitPaths(temp_dir)
             context = {
                 'project_name': 'test',
                 'group': 'com.test',
-                'version': '1.0.0',
-                'timestamp': datetime.now()
+                'version': '1.0.0'
             }
             
-            gen = ProjectGenerator(template_dir, context, output_dir)
-            gen._render_text_file(test_file, output_dir / "test.txt")
+            gen = ProjectGenerator(template_dir, paths, context)
+            output_dir = Path(temp_dir) / "output"
+            gen._render_file(test_file, output_dir / "test.txt", context)
             
             # Verify
             result = (output_dir / "test.txt").read_text()
@@ -704,8 +688,7 @@ Missing: {{ config('custom.missing', 'default') }}
 """)
             
             # Generate with custom config
-            output_dir = Path(temp_dir) / "output"
-            output_dir.mkdir(parents=True, exist_ok=True)
+            paths = GradleInitPaths(temp_dir)
             context = {
                 'project_name': 'test',
                 'group': 'com.test',
@@ -716,8 +699,9 @@ Missing: {{ config('custom.missing', 'default') }}
                 }
             }
             
-            gen = ProjectGenerator(template_dir, context, output_dir)
-            gen._render_text_file(test_file, output_dir / "test.txt")
+            gen = ProjectGenerator(template_dir, paths, context)
+            output_dir = Path(temp_dir) / "output"
+            gen._render_file(test_file, output_dir / "test.txt", context)
             
             # Verify
             result = (output_dir / "test.txt").read_text()
@@ -741,16 +725,16 @@ kebab-case: {{ project_name | kebab_case }}
 """)
             
             # Generate
-            output_dir = Path(temp_dir) / "output"
-            output_dir.mkdir(parents=True, exist_ok=True)
+            paths = GradleInitPaths(temp_dir)
             context = {
                 'project_name': 'my_test_app',
                 'group': 'com.test',
                 'version': '1.0.0'
             }
             
-            gen = ProjectGenerator(template_dir, context, output_dir)
-            gen._render_text_file(test_file, output_dir / "test.txt")
+            gen = ProjectGenerator(template_dir, paths, context)
+            output_dir = Path(temp_dir) / "output"
+            gen._render_file(test_file, output_dir / "test.txt", context)
             
             # Verify
             result = (output_dir / "test.txt").read_text()
@@ -772,12 +756,19 @@ class TestPerformance(unittest.TestCase):
         temp_dir = Path(tempfile.mkdtemp())
 
         try:
-            # Use local templates
-            home = Path.home()
-            templates_dir = home / ".gradleInit" / "templates" / "official"
-            
-            if not templates_dir.exists():
-                self.skipTest("Local templates not found. Run: gradleInit templates --update")
+            # Clone templates
+            templates_dir = temp_dir / "templates"
+            result = subprocess.run(
+                ['git', 'clone', '--depth', '1',
+                 'https://github.com/stotz/gradleInitTemplates.git',
+                 str(templates_dir)],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode != 0:
+                self.skipTest("Could not clone templates")
 
             # Generate project
             template_path = templates_dir / 'kotlin-single'
@@ -787,9 +778,9 @@ class TestPerformance(unittest.TestCase):
                 'project_name': 'test-project',
                 'group': 'com.test',
                 'version': '1.0.0',
-                'kotlin_version': DEFAULT_KOTLIN_VERSION,
-                'jdk_version': SYSTEM_JAVA_VERSION,
-                'company': 'Test Company',
+                'kotlin_version': '2.2.0',
+                'jdk_version': 21,
+                'vendor': 'Test Vendor',
                 'date': '2025-11-15'
             }
 
