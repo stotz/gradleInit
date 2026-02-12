@@ -3051,6 +3051,18 @@ def handle_init_command(args: argparse.Namespace,
                     if hint.default_value:
                         print(f"                           Default: {hint.default_value}")
                 print()
+            
+            # Show config options from TEMPLATE.md arguments
+            template_args = metadata.get_arguments()
+            config_args = [arg for arg in template_args if arg.type == 'boolean' or 
+                          (arg.name not in ['group', 'version'] and arg.context_key not in ['group', 'version'])]
+            if config_args:
+                print("Config Options (--config KEY=VALUE):")
+                for arg in config_args:
+                    default_str = f" (default: {arg.default})" if arg.default is not None else ""
+                    type_str = f"[{arg.type}]" if arg.type else ""
+                    print(f"  {arg.name:24} {arg.help}{default_str} {type_str}")
+                print()
         
         print("Examples:")
         print("  # Simple project")
