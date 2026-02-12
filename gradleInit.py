@@ -3021,61 +3021,80 @@ def handle_init_command(args: argparse.Namespace,
     
     # Template-aware help
     if args.help:
-        print_header("Init Command Help")
-        print("Create a new project from a template")
-        print()
-        print("Usage:")
-        print("  gradleInit.py init PROJECT_NAME --template TEMPLATE [OPTIONS]")
-        print()
-        print("Required Arguments:")
-        print("  PROJECT_NAME              Name of the project to create")
-        print("  --template TEMPLATE       Template to use (name or URL)")
-        print()
-        print("Optional Arguments:")
-        print("  --group GROUP             Maven group ID (e.g., com.example)")
-        print("  --project-version VERSION Project version (e.g., 0.1.0)")
-        print("  --config KEY=VALUE        Set template configuration")
-        print()
-        
-        # Show template-specific variables if template is loaded
+        # If template is loaded, show template-specific help
         if metadata:
-            hints = metadata.get_template_hints()
-            if hints:
-                print("Template Variables:")
-                for hint in sorted(hints, key=lambda h: h.sort_order):
-                    # All variables are optional (required attribute not defined)
-                    optional = " (optional)" if hint.default_value else ""
-                    print(f"  --{hint.name:20} {hint.help_text}{optional}")
-                    if hint.regex_pattern:
-                        print(f"                           Pattern: {hint.regex_pattern}")
-                    if hint.default_value:
-                        print(f"                           Default: {hint.default_value}")
+            template_name = metadata.get_name()
+            template_desc = metadata.metadata.get('description', '')
+            template_version = metadata.metadata.get('version', '')
+            template_help = metadata.metadata.get('help', '')
+            
+            print_header(f"{template_name} Template")
+            if template_desc:
+                print(f"{template_desc}")
+            if template_version:
+                print(f"Version: {template_version}")
+            print()
+            
+            # Show custom help text from TEMPLATE.md if available
+            if template_help:
+                print(template_help.strip())
                 print()
             
-            # Show config options from TEMPLATE.md arguments
+            # Show arguments/options
             template_args = metadata.get_arguments()
-            config_args = [arg for arg in template_args if arg.type == 'boolean' or 
-                          (arg.name not in ['group', 'version'] and arg.context_key not in ['group', 'version'])]
-            if config_args:
-                print("Config Options (--config KEY=VALUE):")
-                for arg in config_args:
-                    default_str = f" (default: {arg.default})" if arg.default is not None else ""
-                    type_str = f"[{arg.type}]" if arg.type else ""
-                    print(f"  {arg.name:24} {arg.help}{default_str} {type_str}")
+            if template_args:
+                print("Options:")
+                for arg in template_args:
+                    required_str = " (required)" if arg.required else ""
+                    default_str = f" [default: {arg.default}]" if arg.default is not None and not arg.required else ""
+                    type_hint = f" <{arg.type}>" if arg.type and arg.type != 'string' else ""
+                    
+                    if arg.type == 'boolean':
+                        print(f"  --config {arg.name}=true|false")
+                    else:
+                        print(f"  --{arg.name}{type_hint}")
+                    print(f"      {arg.help}{required_str}{default_str}")
                 print()
-        
-        print("Examples:")
-        print("  # Simple project")
-        print("  gradleInit.py init my-app --template kotlin-single")
-        print()
-        print("  # With custom group")
-        print("  gradleInit.py init my-app --template kotlin-single --group com.mycompany")
-        print()
-        print("  # Spring Boot with config")
-        print("  gradleInit.py init my-api --template springboot \\")
-        print("    --config spring.modules=web,data-jpa \\")
-        print("    --config database.driver=postgresql")
-        print()
+            
+            # Show requirements if any
+            requirements = metadata.metadata.get('requirements', {})
+            if requirements:
+                print("Requirements:")
+                for key, value in requirements.items():
+                    print(f"  {key}: {value}")
+                print()
+        else:
+            # Generic help without template
+            print_header("Init Command Help")
+            print("Create a new project from a template")
+            print()
+            print("Usage:")
+            print("  gradleInit init PROJECT_NAME --template TEMPLATE [OPTIONS]")
+            print()
+            print("Required Arguments:")
+            print("  PROJECT_NAME              Name of the project to create")
+            print("  --template TEMPLATE       Template to use (name or URL)")
+            print()
+            print("Optional Arguments:")
+            print("  --group GROUP             Maven group ID (e.g., com.example)")
+            print("  --project-version VERSION Project version (e.g., 0.1.0)")
+            print("  --config KEY=VALUE        Set template configuration")
+            print()
+            print("Available Templates:")
+            print("  kotlin-single      Simple single-module Kotlin project")
+            print("  kotlin-multi       Multi-module Kotlin project with buildSrc")
+            print("  ktor               Ktor web server application")
+            print("  springboot         Spring Boot application")
+            print("  kotlin-javaFX      JavaFX desktop application")
+            print("  multiproject-root  Root structure for multi-module projects")
+            print()
+            print("Examples:")
+            print("  gradleInit init my-app --template kotlin-single")
+            print("  gradleInit init my-app --template kotlin-single --group com.mycompany")
+            print("  gradleInit init my-app --template kotlin-single --config enable_clikt=true")
+            print()
+            print("Use --template <name> -h for template-specific help.")
+            print()
         return 0
 
     # Interactive mode - prompt for missing values with config-aware defaults
