@@ -570,8 +570,8 @@ class GradleInitPaths:
             'defaults': {
                 'group': 'com.example',
                 'version': '0.1.0',
-                'gradle_version': '8.11',
-                'kotlin_version': '2.1.0',
+                'gradle_version': '9.3.1',
+                'kotlin_version': '2.3.10',
                 'jdk_version': '21'
             },
             'custom': {
@@ -2973,7 +2973,7 @@ def handle_init_command(args: argparse.Namespace,
             print("Examples:")
             print("  gradleInit init myApp --template kotlin-single")
             print("  gradleInit init myApp --template kotlin-single --group com.example")
-            print("  gradleInit init myApp --template springboot --gradle-version 8.11")
+            print("  gradleInit init myApp --template springboot --gradle-version 9.3.1")
             print("  gradleInit init myApp --interactive")
             print()
             print("List available templates:")

@@ -208,6 +208,10 @@ jobs:
             --template kotlin-multi \
             --group com.example
       
+      - name: Generate Gradle wrapper
+        working-directory: test-multi
+        run: gradle wrapper --gradle-version ${{ env.GRADLE_VERSION }}
+      
       - name: Build and test
         working-directory: test-multi
         run: |
