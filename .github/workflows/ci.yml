@@ -35,12 +35,11 @@ jobs:
       
       - name: Run gradleInit tests
         run: |
-          cd gradleInit
           python -m pytest tests/ -v || python gradleInit.py test
       
       - name: Update templates
         run: |
-          python gradleInit/gradleInit.py templates --update
+          python gradleInit.py templates --update
 
   # ==========================================================================
   # Job 2: Test Single Templates (kotlin-single, ktor, springboot, kotlin-javaFX)
@@ -88,12 +87,12 @@ jobs:
         run: pip install jinja2 toml pyyaml requests
       
       - name: Update templates
-        run: python gradleInit/gradleInit.py templates --update
+        run: python gradleInit.py templates --update
       
       - name: Generate project from template
         run: |
           TEMPLATE_NAME="${{ matrix.template_name || matrix.template }}"
-          python gradleInit/gradleInit.py init test-${{ matrix.template }} \
+          python gradleInit.py init test-${{ matrix.template }} \
             --template "$TEMPLATE_NAME" \
             --group com.example \
             ${{ matrix.config }}
@@ -136,11 +135,11 @@ jobs:
         run: pip install jinja2 toml pyyaml requests
       
       - name: Update templates
-        run: python gradleInit/gradleInit.py templates --update
+        run: python gradleInit.py templates --update
       
       - name: Generate JavaFX project
         run: |
-          python gradleInit/gradleInit.py init test-javafx \
+          python gradleInit.py init test-javafx \
             --template kotlin-javaFX \
             --group com.example
       
@@ -177,11 +176,11 @@ jobs:
         run: pip install jinja2 toml pyyaml requests
       
       - name: Update templates
-        run: python gradleInit/gradleInit.py templates --update
+        run: python gradleInit.py templates --update
       
       - name: Generate kotlin-multi project
         run: |
-          python gradleInit/gradleInit.py init test-multi \
+          python gradleInit.py init test-multi \
             --template kotlin-multi \
             --group com.example
       
@@ -218,25 +217,25 @@ jobs:
         run: pip install jinja2 toml pyyaml requests
       
       - name: Update templates
-        run: python gradleInit/gradleInit.py templates --update
+        run: python gradleInit.py templates --update
       
       - name: Create multiproject-root
         run: |
-          python gradleInit/gradleInit.py init enterprise-app \
+          python gradleInit.py init enterprise-app \
             --template multiproject-root \
             --group com.enterprise
       
       - name: Add kotlin-single subproject (CLI core)
         run: |
           cd enterprise-app
-          python ../gradleInit/gradleInit.py subproject core \
+          python ../gradleInit.py subproject core \
             --template kotlin-single \
             --group com.enterprise
       
       - name: Add kotlin-single-clikt subproject (CLI app)
         run: |
           cd enterprise-app
-          python ../gradleInit/gradleInit.py subproject cli \
+          python ../gradleInit.py subproject cli \
             --template kotlin-single \
             --config enable_clikt=true \
             --group com.enterprise
@@ -244,14 +243,14 @@ jobs:
       - name: Add ktor subproject (API)
         run: |
           cd enterprise-app
-          python ../gradleInit/gradleInit.py subproject api \
+          python ../gradleInit.py subproject api \
             --template ktor \
             --group com.enterprise
       
       - name: Add springboot subproject (Backend)
         run: |
           cd enterprise-app
-          python ../gradleInit/gradleInit.py subproject backend \
+          python ../gradleInit.py subproject backend \
             --template springboot \
             --group com.enterprise
       
