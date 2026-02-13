@@ -111,6 +111,15 @@ jobs:
           chmod +x gradlew
           ./gradlew clean build test --no-daemon
       
+      - name: Initialize Git repository
+        working-directory: test-${{ matrix.template }}
+        run: |
+          git init
+          git config user.email "ci@example.com"
+          git config user.name "CI"
+          git add .
+          git commit -m "Initial commit"
+      
       - name: Build with Git info
         working-directory: test-${{ matrix.template }}
         run: |
