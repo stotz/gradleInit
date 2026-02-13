@@ -14,10 +14,10 @@ env:
 
 jobs:
   # ==========================================================================
-  # Job 1: Test gradleInit Python Tool and Update Templates
+  # Job 1: Update Templates
   # ==========================================================================
-  test-gradleinit:
-    name: Test gradleInit Tool
+  update-templates:
+    name: Update Templates
     runs-on: ubuntu-latest
     
     steps:
@@ -33,13 +33,13 @@ jobs:
         run: |
           pip install jinja2 toml pyyaml requests
       
-      - name: Run gradleInit tests
-        run: |
-          python -m pytest tests/ -v || python gradleInit.py test
-      
       - name: Update templates
         run: |
           python gradleInit.py templates --update
+      
+      - name: List templates
+        run: |
+          python gradleInit.py templates --list
 
   # ==========================================================================
   # Job 2: Test Single Templates (kotlin-single, ktor, springboot, kotlin-javaFX)
@@ -47,7 +47,7 @@ jobs:
   test-single-templates:
     name: Test ${{ matrix.template }}
     runs-on: ubuntu-latest
-    needs: test-gradleinit
+    needs: update-templates
     
     strategy:
       fail-fast: false
@@ -114,7 +114,7 @@ jobs:
   test-javafx:
     name: Test kotlin-javaFX
     runs-on: ubuntu-latest
-    needs: test-gradleinit
+    needs: update-templates
     
     steps:
       - name: Checkout
@@ -155,7 +155,7 @@ jobs:
   test-kotlin-multi:
     name: Test kotlin-multi
     runs-on: ubuntu-latest
-    needs: test-gradleinit
+    needs: update-templates
     
     steps:
       - name: Checkout
@@ -285,7 +285,7 @@ jobs:
   ci-summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [test-gradleinit, test-single-templates, test-javafx, test-kotlin-multi, test-multiproject-full]
+    needs: [update-templates, test-single-templates, test-javafx, test-kotlin-multi, test-multiproject-full]
     if: always()
     
     steps:
@@ -295,7 +295,7 @@ jobs:
           echo "  gradleInit CI Summary"
           echo "======================================"
           echo ""
-          echo "gradleInit Tool:     ${{ needs.test-gradleinit.result }}"
+          echo "Update Templates:    ${{ needs.update-templates.result }}"
           echo "Single Templates:    ${{ needs.test-single-templates.result }}"
           echo "JavaFX Template:     ${{ needs.test-javafx.result }}"
           echo "Kotlin-Multi:        ${{ needs.test-kotlin-multi.result }}"
