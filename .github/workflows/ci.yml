@@ -89,6 +89,9 @@ jobs:
       - name: Update templates
         run: python gradleInit.py templates --update
       
+      - name: Download modules
+        run: python gradleInit.py --download-modules
+      
       - name: Generate project from template
         run: |
           TEMPLATE_NAME="${{ matrix.template_name || matrix.template }}"
@@ -137,6 +140,9 @@ jobs:
       - name: Update templates
         run: python gradleInit.py templates --update
       
+      - name: Download modules
+        run: python gradleInit.py --download-modules
+      
       - name: Generate JavaFX project
         run: |
           python gradleInit.py init test-javafx \
@@ -178,6 +184,9 @@ jobs:
       - name: Update templates
         run: python gradleInit.py templates --update
       
+      - name: Download modules
+        run: python gradleInit.py --download-modules
+      
       - name: Generate kotlin-multi project
         run: |
           python gradleInit.py init test-multi \
@@ -218,6 +227,9 @@ jobs:
       
       - name: Update templates
         run: python gradleInit.py templates --update
+      
+      - name: Download modules
+        run: python gradleInit.py --download-modules
       
       - name: Create multiproject-root
         run: |
