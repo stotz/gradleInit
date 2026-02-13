@@ -699,6 +699,24 @@ class ModuleLoader:
             print_warning("Continuing without advanced features")
             return False
 
+    def force_download_modules(self) -> bool:
+        """
+        Force download modules without interactive prompt.
+        Used by --download-modules flag for CI/automation.
+        """
+        # Check if modules already exist
+        if self._modules_exist():
+            print_info("Modules already installed")
+            return self._load_modules()
+
+        # Check git availability
+        if not GIT_AVAILABLE:
+            print_error("Git not available - cannot download modules")
+            return False
+
+        # Download directly without asking
+        return self._download_modules()
+
     def _load_modules(self) -> bool:
         """Load modules into Python path"""
         try:
@@ -3404,7 +3422,8 @@ def main():
 
     # Handle module commands first
     if phase1_args.download_modules:
-        success = module_loader.ensure_modules(auto_download=True)
+        # Direct download without interactive prompt
+        success = module_loader.force_download_modules()
         return 0 if success else 1
 
     if phase1_args.update_modules:
