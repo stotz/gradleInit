@@ -2414,12 +2414,16 @@ class ProjectGenerator:
         print_info("Running post-generation tasks...")
         print_info("*** gradleInit.py v010 - VERBOSE MODE ***")
 
-        # Generate Gradle Wrapper if build.gradle.kts or build.gradle exists
+        # Generate Gradle Wrapper if build.gradle.kts, build.gradle, or settings.gradle.kts exists
         gradle_build = self.target_path / 'build.gradle.kts'
         if not gradle_build.exists():
             gradle_build = self.target_path / 'build.gradle'
+        
+        settings_gradle = self.target_path / 'settings.gradle.kts'
+        if not settings_gradle.exists():
+            settings_gradle = self.target_path / 'settings.gradle'
 
-        if gradle_build.exists():
+        if gradle_build.exists() or settings_gradle.exists():
             self._generate_gradle_wrapper()
 
         # Initialize git repository
@@ -3853,8 +3857,15 @@ def handle_subproject_command(args: argparse.Namespace,
     # Get template hints and set defaults for all variables
     hints = metadata.get_template_hints()
     for hint in hints:
-        if hint.name not in context and hint.default_value:
+        if hint.name not in context and hint.default_value is not None:
             context[hint.name] = hint.default_value
+    
+    # Get template arguments and set defaults (including boolean defaults like enable_clikt)
+    arguments = metadata.get_arguments()
+    for arg in arguments:
+        if arg.context_key and arg.context_key not in context:
+            if arg.default is not None:
+                context[arg.context_key] = arg.default
     
     # Interactive prompts for template variables
     if args.interactive:
