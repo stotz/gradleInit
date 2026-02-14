@@ -1697,6 +1697,21 @@ class TemplateMetadata:
         """
         return self.hint_parser.get_sorted_variables()
     
+    def get_raw_copy_files(self) -> set:
+        """
+        Get set of files that should be copied without Jinja2 processing.
+        
+        These files are copied as-is (raw copy) without template rendering
+        and are defined in TEMPLATE.md under 'raw_copy' list.
+        
+        Returns:
+            Set of filenames that should be raw copied
+        """
+        raw_copy = self.metadata.get('raw_copy', [])
+        if isinstance(raw_copy, list):
+            return set(raw_copy)
+        return set()
+    
     def compile_template_file(self, file_path: Path) -> str:
         """
         Compile a template file by removing inline hints
