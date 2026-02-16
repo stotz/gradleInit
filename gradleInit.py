@@ -823,6 +823,339 @@ class ModuleLoader:
 
 
 # ============================================================================
+# Version Management (npm-style constraints)
+# ============================================================================
+
+@dataclass
+class VersionEntry:
+    """Parsed version entry from libs.versions.toml"""
+    name: str                        # Version key (e.g., "kotlin")
+    current_version: str             # Current version value
+    url: Optional[str] = None        # Maven repository URL
+    constraint: Optional[str] = None # Version constraint (@pin, @*, @^1.2, etc.)
+    line_number: int = 0             # Line number in file
+    comment_line_number: int = 0     # Line number of comment
+
+
+class VersionConstraintChecker:
+    """Check versions against npm-style constraints"""
+    
+    @staticmethod
+    def parse_constraint(constraint: str) -> Tuple[str, Optional[str]]:
+        """
+        Parse constraint string into type and value.
+        
+        Returns: (type, value) where type is one of:
+            'pin', 'latest', 'caret', 'tilde', 'gte', 'lte', 'gt', 'lt', 'range', 'wildcard', 'exact'
+        """
+        if not constraint:
+            return ('latest', None)
+        
+        constraint = constraint.strip()
+        
+        if constraint == 'pin':
+            return ('pin', None)
+        if constraint == '*':
+            return ('latest', None)
+        if constraint.startswith('^'):
+            return ('caret', constraint[1:])
+        if constraint.startswith('~'):
+            return ('tilde', constraint[1:])
+        if constraint.startswith('>=') and '<' in constraint:
+            # Range: >=1.0 <2.0
+            return ('range', constraint)
+        if constraint.startswith('>='):
+            return ('gte', constraint[2:].strip())
+        if constraint.startswith('<='):
+            return ('lte', constraint[2:].strip())
+        if constraint.startswith('>'):
+            return ('gt', constraint[1:].strip())
+        if constraint.startswith('<'):
+            return ('lt', constraint[1:].strip())
+        if constraint.endswith('.x') or constraint.endswith('.*'):
+            return ('wildcard', constraint[:-2])
+        # Exact version
+        return ('exact', constraint)
+    
+    @staticmethod
+    def parse_version(version: str) -> Tuple[int, int, int, str]:
+        """Parse version string into (major, minor, patch, rest)"""
+        import re
+        match = re.match(r'^(\d+)(?:\.(\d+))?(?:\.(\d+))?(.*)$', version)
+        if not match:
+            return (0, 0, 0, version)
+        major = int(match.group(1))
+        minor = int(match.group(2)) if match.group(2) else 0
+        patch = int(match.group(3)) if match.group(3) else 0
+        rest = match.group(4) or ''
+        return (major, minor, patch, rest)
+    
+    @staticmethod
+    def compare_versions(v1: str, v2: str) -> int:
+        """Compare two versions. Returns -1 if v1<v2, 0 if equal, 1 if v1>v2"""
+        p1 = VersionConstraintChecker.parse_version(v1)
+        p2 = VersionConstraintChecker.parse_version(v2)
+        
+        for i in range(3):
+            if p1[i] < p2[i]:
+                return -1
+            if p1[i] > p2[i]:
+                return 1
+        return 0
+    
+    @staticmethod
+    def satisfies(version: str, constraint: str) -> bool:
+        """Check if version satisfies the constraint"""
+        ctype, cvalue = VersionConstraintChecker.parse_constraint(constraint)
+        
+        if ctype == 'pin':
+            return False  # Never update
+        if ctype == 'latest':
+            return True   # Always update
+        if ctype == 'exact':
+            return False  # Pinned to exact version
+        
+        v_major, v_minor, v_patch, _ = VersionConstraintChecker.parse_version(version)
+        
+        if ctype == 'caret':
+            # ^1.2.3 means >=1.2.3 <2.0.0
+            c_major, c_minor, c_patch, _ = VersionConstraintChecker.parse_version(cvalue)
+            if v_major != c_major:
+                return False
+            if v_major == 0:
+                # Special case: ^0.x allows only patch updates
+                return v_minor == c_minor and v_patch >= c_patch
+            return VersionConstraintChecker.compare_versions(version, cvalue) >= 0
+        
+        if ctype == 'tilde':
+            # ~1.2.3 means >=1.2.3 <1.3.0
+            c_major, c_minor, c_patch, _ = VersionConstraintChecker.parse_version(cvalue)
+            if v_major != c_major or v_minor != c_minor:
+                return False
+            return v_patch >= c_patch
+        
+        if ctype == 'gte':
+            return VersionConstraintChecker.compare_versions(version, cvalue) >= 0
+        
+        if ctype == 'lte':
+            return VersionConstraintChecker.compare_versions(version, cvalue) <= 0
+        
+        if ctype == 'gt':
+            return VersionConstraintChecker.compare_versions(version, cvalue) > 0
+        
+        if ctype == 'lt':
+            return VersionConstraintChecker.compare_versions(version, cvalue) < 0
+        
+        if ctype == 'range':
+            # Parse >=1.0 <2.0
+            import re
+            match = re.match(r'>=([^\s<]+)\s*<([^\s]+)', cvalue if cvalue else constraint)
+            if match:
+                lower = match.group(1)
+                upper = match.group(2)
+                return (VersionConstraintChecker.compare_versions(version, lower) >= 0 and
+                        VersionConstraintChecker.compare_versions(version, upper) < 0)
+            return False
+        
+        if ctype == 'wildcard':
+            # 1.x means >=1.0.0 <2.0.0
+            c_major, c_minor, _, _ = VersionConstraintChecker.parse_version(cvalue)
+            if '.' in cvalue:
+                # 1.2.x
+                return v_major == c_major and v_minor == c_minor
+            else:
+                # 1.x
+                return v_major == c_major
+        
+        return False
+
+
+class VersionManager:
+    """Manage dependency versions in libs.versions.toml"""
+    
+    URL_PATTERN = re.compile(r'#\s*(https://mvnrepository\.com/artifact/[^\s]+)(?:\s+@(\S+))?')
+    VERSION_PATTERN = re.compile(r'^(\w[\w\-_]*)\s*=\s*"([^"]+)"')
+    
+    def __init__(self, toml_path: Path):
+        self.toml_path = toml_path
+        self.entries: List[VersionEntry] = []
+        self._parse()
+    
+    def _parse(self):
+        """Parse libs.versions.toml file"""
+        if not self.toml_path.exists():
+            return
+        
+        content = self.toml_path.read_text(encoding='utf-8')
+        lines = content.split('\n')
+        
+        in_versions_section = False
+        pending_url = None
+        pending_constraint = None
+        pending_comment_line = 0
+        
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            
+            # Track sections
+            if stripped.startswith('[versions]'):
+                in_versions_section = True
+                continue
+            elif stripped.startswith('[') and stripped.endswith(']'):
+                in_versions_section = False
+                continue
+            
+            if not in_versions_section:
+                continue
+            
+            # Check for URL comment
+            url_match = self.URL_PATTERN.search(line)
+            if url_match:
+                pending_url = url_match.group(1)
+                pending_constraint = url_match.group(2)  # May be None
+                pending_comment_line = i
+                continue
+            
+            # Check for version entry
+            version_match = self.VERSION_PATTERN.match(stripped)
+            if version_match:
+                name = version_match.group(1)
+                version = version_match.group(2)
+                
+                entry = VersionEntry(
+                    name=name,
+                    current_version=version,
+                    url=pending_url,
+                    constraint=pending_constraint,
+                    line_number=i,
+                    comment_line_number=pending_comment_line if pending_url else 0
+                )
+                self.entries.append(entry)
+                
+                # Reset pending
+                pending_url = None
+                pending_constraint = None
+                pending_comment_line = 0
+    
+    def get_entry(self, name: str) -> Optional[VersionEntry]:
+        """Get entry by name"""
+        for entry in self.entries:
+            if entry.name == name:
+                return entry
+        return None
+    
+    def extract_artifact_coords(self, url: str) -> Tuple[str, str]:
+        """Extract groupId and artifactId from Maven URL"""
+        # https://mvnrepository.com/artifact/org.jetbrains.kotlin/kotlin-stdlib
+        import re
+        match = re.search(r'/artifact/([^/]+)/([^/\s@]+)', url)
+        if match:
+            return (match.group(1), match.group(2))
+        return ('', '')
+    
+    def check_updates(self, maven_central=None) -> List[Dict[str, Any]]:
+        """
+        Check for available updates.
+        
+        Returns list of dicts with keys:
+            name, current, latest, status, constraint, message
+        """
+        results = []
+        
+        for entry in self.entries:
+            result = {
+                'name': entry.name,
+                'current': entry.current_version,
+                'latest': None,
+                'status': 'SKIP',
+                'constraint': entry.constraint,
+                'message': ''
+            }
+            
+            # No URL = skip
+            if not entry.url:
+                result['status'] = 'SKIP'
+                result['message'] = 'no source URL'
+                results.append(result)
+                continue
+            
+            # Pinned
+            if entry.constraint == 'pin' or entry.constraint is None:
+                # URL without @constraint = implicitly pinned
+                if entry.constraint == 'pin':
+                    result['status'] = 'PINNED'
+                    result['message'] = '@pin'
+                else:
+                    result['status'] = 'PINNED'
+                    result['message'] = 'implicit pin (no @constraint)'
+                results.append(result)
+                continue
+            
+            # Exact version constraint
+            ctype, _ = VersionConstraintChecker.parse_constraint(entry.constraint)
+            if ctype == 'exact':
+                result['status'] = 'PINNED'
+                result['message'] = f'@{entry.constraint}'
+                results.append(result)
+                continue
+            
+            # Try to get latest version
+            if maven_central:
+                group_id, artifact_id = self.extract_artifact_coords(entry.url)
+                if group_id and artifact_id:
+                    try:
+                        latest = maven_central.get_latest_version(group_id, artifact_id)
+                        result['latest'] = latest
+                        
+                        if latest == entry.current_version:
+                            result['status'] = 'CURRENT'
+                            result['message'] = 'up to date'
+                        elif VersionConstraintChecker.satisfies(latest, entry.constraint):
+                            result['status'] = 'UPDATE'
+                            result['message'] = f'@{entry.constraint}'
+                        else:
+                            result['status'] = 'VIOLATE'
+                            result['message'] = f'{latest} violates @{entry.constraint}'
+                    except Exception as e:
+                        result['status'] = 'ERROR'
+                        result['message'] = str(e)
+            else:
+                result['status'] = 'NO_API'
+                result['message'] = 'Maven Central API not available'
+            
+            results.append(result)
+        
+        return results
+    
+    def update_version(self, name: str, new_version: str) -> bool:
+        """Update a version in the TOML file"""
+        entry = self.get_entry(name)
+        if not entry:
+            return False
+        
+        content = self.toml_path.read_text(encoding='utf-8')
+        lines = content.split('\n')
+        
+        # Update the line
+        line_idx = entry.line_number - 1
+        old_line = lines[line_idx]
+        new_line = re.sub(
+            r'^(\s*' + re.escape(name) + r'\s*=\s*")[^"]+(")',
+            r'\g<1>' + new_version + r'\g<2>',
+            old_line
+        )
+        lines[line_idx] = new_line
+        
+        # Write back
+        self.toml_path.write_text('\n'.join(lines), encoding='utf-8')
+        
+        # Update entry
+        entry.current_version = new_version
+        
+        return True
+
+
+# ============================================================================
 # Feature Stubs (When Modules Not Available)
 # ============================================================================
 
@@ -1825,17 +2158,35 @@ class DynamicCLIBuilder:
         config_parser.add_argument('--init', action='store_true',
                                    help='Initialize configuration')
 
+        # VERSIONS COMMAND
+        versions_parser = subparsers.add_parser('versions',
+                                                 help='Check and update dependency versions')
+        versions_parser.add_argument('--check', action='store_true',
+                                      help='Check for available updates')
+        versions_parser.add_argument('--update', action='store_true',
+                                      help='Update dependencies')
+        versions_parser.add_argument('--yes', '-y', action='store_true',
+                                      help='Apply updates without confirmation')
+        versions_parser.add_argument('dependency', nargs='?',
+                                      help='Specific dependency to update (optional)')
+
         # SUBPROJECT COMMAND
         subproject_parser = subparsers.add_parser('subproject',
-                                                   help='Add a subproject to existing multi-module project')
+                                                   help='Add a subproject to existing multi-module project',
+                                                   add_help=False)
         subproject_parser.add_argument('name',
                                         help='Subproject name/directory')
         subproject_parser.add_argument('--template', '-t', required=True,
                                         help='Template to use for subproject')
         subproject_parser.add_argument('--group', '-g',
                                         help='Override group ID')
+        subproject_parser.add_argument('--config', action='append',
+                                        metavar='KEY=VALUE',
+                                        help='Set configuration value (can be used multiple times)')
         subproject_parser.add_argument('--interactive', '-i', action='store_true',
                                         help='Interactive mode')
+        subproject_parser.add_argument('-h', '--help', action='store_true',
+                                        help='Show help (includes template-specific options)')
 
         return parser
 
@@ -2899,32 +3250,44 @@ class SubprojectGenerator:
         Merge TOML content (simple implementation).
         
         Adds entries from template that don't exist in root.
+        Preserves comments above each entry.
         """
-        # Parse into sections
-        def parse_sections(content: str) -> Dict[str, Dict[str, str]]:
+        # Parse into sections, preserving comments
+        def parse_sections(content: str) -> Dict[str, Dict[str, Tuple[str, List[str]]]]:
+            """Returns {section: {key: (line, [preceding_comments])}}"""
             sections = {}
             current_section = None
+            pending_comments = []
+            
             for line in content.split('\n'):
-                line = line.strip()
-                if line.startswith('[') and line.endswith(']'):
-                    current_section = line[1:-1]
+                stripped = line.strip()
+                if stripped.startswith('[') and stripped.endswith(']'):
+                    current_section = stripped[1:-1]
                     sections[current_section] = {}
-                elif '=' in line and current_section:
-                    key = line.split('=')[0].strip()
-                    sections[current_section][key] = line
+                    pending_comments = []
+                elif stripped.startswith('#'):
+                    pending_comments.append(line)
+                elif '=' in stripped and current_section:
+                    key = stripped.split('=')[0].strip()
+                    sections[current_section][key] = (line, pending_comments.copy())
+                    pending_comments = []
+                elif stripped == '':
+                    # Empty line resets comments (only for versions section)
+                    if current_section == 'versions':
+                        pending_comments = []
             return sections
         
         root_sections = parse_sections(root)
         template_sections = parse_sections(template)
         
-        # Find new entries
+        # Find new entries with their comments
         additions = {}
         for section, entries in template_sections.items():
             if section not in additions:
                 additions[section] = []
-            for key, line in entries.items():
+            for key, (line, comments) in entries.items():
                 if section not in root_sections or key not in root_sections[section]:
-                    additions[section].append(line)
+                    additions[section].append((line, comments))
         
         # Append new entries to root
         result = root.rstrip()
@@ -2945,19 +3308,25 @@ class SubprojectGenerator:
                         elif in_section and (line.startswith('[') or i == len(lines) - 1):
                             # End of section, insert entries
                             if not added:
-                                for entry in entries:
-                                    new_lines.insert(-1, entry)
+                                for entry_line, comments in entries:
+                                    for comment in comments:
+                                        new_lines.insert(-1, comment)
+                                    new_lines.insert(-1, entry_line)
                                 added = True
                             in_section = False
                     if not added:
-                        for entry in entries:
-                            new_lines.append(entry)
+                        for entry_line, comments in entries:
+                            for comment in comments:
+                                new_lines.append(comment)
+                            new_lines.append(entry_line)
                     result = '\n'.join(new_lines)
                 else:
                     # Create new section
                     result += f'\n\n{section_header}\n'
-                    for entry in entries:
-                        result += f'{entry}\n'
+                    for entry_line, comments in entries:
+                        for comment in comments:
+                            result += f'{comment}\n'
+                        result += f'{entry_line}\n'
         
         return result
 
@@ -3828,6 +4197,38 @@ def handle_subproject_command(args: argparse.Namespace,
     # Load template metadata
     metadata = TemplateMetadata(template_path, paths.compiled_templates)
     
+    # Show help if requested
+    if getattr(args, 'help', False):
+        print(f"\nTemplate: {args.template}")
+        print(f"Description: {metadata.metadata.get('description', 'No description')}")
+        print()
+        print("Usage: gradleInit subproject <name> --template", args.template, "[options]")
+        print()
+        print("Options:")
+        print("  --group, -g GROUP     Override group ID")
+        print("  --config KEY=VALUE    Set configuration value (can be used multiple times)")
+        print("  --interactive, -i     Interactive mode")
+        print()
+        
+        # Show template arguments
+        arguments = metadata.get_arguments()
+        if arguments:
+            print("Template-specific configuration (use with --config):")
+            for arg in arguments:
+                default_str = f" (default: {arg.default})" if arg.default is not None else ""
+                print(f"  {arg.context_key}: {arg.help}{default_str}")
+            print()
+        
+        # Show template hints
+        hints = metadata.get_template_hints()
+        if hints:
+            print("Template variables:")
+            for hint in hints:
+                default_str = f" (default: {hint.default_value})" if hint.default_value else ""
+                print(f"  {hint.name}: {hint.help_text or 'No description'}{default_str}")
+        
+        return 0
+    
     # Check if template supports subproject mode
     subproject_config = metadata.metadata.get('subproject_mode')
     if not subproject_config:
@@ -3850,6 +4251,21 @@ def handle_subproject_command(args: argparse.Namespace,
     # Override with CLI args
     if args.group:
         context['group'] = args.group
+    
+    # Process --config arguments
+    if args.config:
+        for config_item in args.config:
+            if '=' in config_item:
+                key, value = config_item.split('=', 1)
+                # Convert string booleans
+                if value.lower() == 'true':
+                    value = True
+                elif value.lower() == 'false':
+                    value = False
+                context[key] = value
+            else:
+                print_error(f"Invalid config format: {config_item} (expected KEY=VALUE)")
+                return 1
     
     # Set project_name to subproject name
     context['project_name'] = args.name
@@ -3904,6 +4320,151 @@ def handle_subproject_command(args: argparse.Namespace,
     if generator.generate():
         return 0
     return 1
+
+
+def handle_versions_command(args: argparse.Namespace) -> int:
+    """
+    Handle versions command - Check and update dependency versions.
+    
+    Args:
+        args: Parsed arguments
+    
+    Returns:
+        Exit code (0 for success)
+    """
+    # Find Gradle root
+    root_path = find_gradle_root()
+    if not root_path:
+        print_error("Not in a Gradle project (no settings.gradle.kts found)")
+        return 1
+    
+    toml_path = root_path / 'gradle' / 'libs.versions.toml'
+    if not toml_path.exists():
+        print_error(f"Version catalog not found: {toml_path}")
+        return 1
+    
+    print_info(f"Checking versions in {toml_path}")
+    print()
+    
+    # Parse TOML
+    manager = VersionManager(toml_path)
+    
+    if not manager.entries:
+        print_warning("No version entries found in [versions] section")
+        return 0
+    
+    # Try to load Maven Central module
+    maven_central = None
+    try:
+        # Try to import the module
+        paths = GradleInitPaths()
+        if paths.modules_dir.exists():
+            sys.path.insert(0, str(paths.modules_dir))
+            try:
+                from maven_central import MavenCentral
+                maven_central = MavenCentral()
+            except ImportError:
+                pass
+    except Exception:
+        pass
+    
+    # Check for updates
+    results = manager.check_updates(maven_central)
+    
+    # Categorize results
+    updates = []
+    pinned = []
+    skipped = []
+    current = []
+    violations = []
+    errors = []
+    
+    for r in results:
+        if r['status'] == 'UPDATE':
+            updates.append(r)
+        elif r['status'] == 'PINNED':
+            pinned.append(r)
+        elif r['status'] == 'SKIP':
+            skipped.append(r)
+        elif r['status'] == 'CURRENT':
+            current.append(r)
+        elif r['status'] == 'VIOLATE':
+            violations.append(r)
+        else:
+            errors.append(r)
+    
+    # Display results
+    max_name_len = max(len(r['name']) for r in results) if results else 10
+    
+    for r in results:
+        name = r['name'].ljust(max_name_len)
+        curr = r['current']
+        
+        if r['status'] == 'UPDATE':
+            latest = r['latest']
+            print(f"  [UPDATE]  {name}: {curr} -> {latest} ({r['message']})")
+        elif r['status'] == 'CURRENT':
+            print(f"  [CURRENT] {name}: {curr} (up to date)")
+        elif r['status'] == 'PINNED':
+            print(f"  [PINNED]  {name}: {curr} ({r['message']})")
+        elif r['status'] == 'SKIP':
+            print(f"  [SKIP]    {name}: {curr} ({r['message']})")
+        elif r['status'] == 'VIOLATE':
+            print(f"  [VIOLATE] {name}: {r['message']}")
+        elif r['status'] == 'NO_API':
+            print(f"  [NO_API]  {name}: {curr} (Maven Central API not available)")
+        else:
+            print(f"  [ERROR]   {name}: {r['message']}")
+    
+    print()
+    
+    # Summary
+    summary_parts = []
+    if updates:
+        summary_parts.append(f"{len(updates)} updates available")
+    if pinned:
+        summary_parts.append(f"{len(pinned)} pinned")
+    if skipped:
+        summary_parts.append(f"{len(skipped)} skipped")
+    if current:
+        summary_parts.append(f"{len(current)} current")
+    if violations:
+        summary_parts.append(f"{len(violations)} constraint violations")
+    
+    print(', '.join(summary_parts))
+    
+    # Apply updates if requested
+    if args.update and updates:
+        print()
+        
+        if not args.yes:
+            response = input("Apply updates? [y/N] ").strip().lower()
+            if response != 'y':
+                print("Aborted.")
+                return 0
+        
+        for r in updates:
+            if args.dependency and r['name'] != args.dependency:
+                continue
+            
+            old_version = r['current']
+            new_version = r['latest']
+            
+            if manager.update_version(r['name'], new_version):
+                print_success(f"Updated {r['name']}: {old_version} -> {new_version}")
+            else:
+                print_error(f"Failed to update {r['name']}")
+    
+    elif args.update and not updates:
+        print("No updates available.")
+    
+    elif not args.check and not args.update:
+        # Default: just show status (already done above)
+        if updates:
+            print()
+            print("Run 'gradleInit versions --update' to apply updates.")
+    
+    return 0
 
 
 # ============================================================================
@@ -4044,6 +4605,9 @@ def main():
 
     elif args.command == 'subproject':
         return handle_subproject_command(args, paths, repo_manager)
+
+    elif args.command == 'versions':
+        return handle_versions_command(args)
 
     return 0
 
