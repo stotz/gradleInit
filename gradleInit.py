@@ -611,26 +611,57 @@ class RepositorySecurity:
         return True, "Signature verified"
     
     def _generate_checksums(self, repo_path: Path) -> str:
-        """Generate SHA256 checksums for repository files"""
+        """Generate SHA256 checksums for repository files tracked by git"""
         lines = []
         
-        # Files to checksum (exclude git, checksums, signature)
-        exclude_patterns = {'.git', '__pycache__', self.CHECKSUMS_FILE, self.SIGNATURE_FILE}
+        # Get list of tracked files from git
+        try:
+            result = subprocess.run(
+                ['git', 'ls-files'],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            tracked_files = result.stdout.strip().split('\n')
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            # Fallback: use all files if git not available
+            tracked_files = None
         
-        for file_path in sorted(repo_path.rglob('*')):
-            if file_path.is_dir():
-                continue
+        # Files to exclude from checksums
+        exclude_files = {self.CHECKSUMS_FILE, self.SIGNATURE_FILE}
+        
+        if tracked_files:
+            # Use git tracked files
+            for rel_path_str in sorted(tracked_files):
+                if not rel_path_str:
+                    continue
+                if rel_path_str in exclude_files:
+                    continue
+                
+                file_path = repo_path / rel_path_str
+                if file_path.exists() and file_path.is_file():
+                    sha256 = hashlib.sha256(file_path.read_bytes()).hexdigest()
+                    # Use posix path for cross-platform consistency
+                    lines.append(f"{sha256}  {Path(rel_path_str).as_posix()}")
+        else:
+            # Fallback: scan directory
+            exclude_patterns = {'.git', '__pycache__'}
             
-            # Skip excluded
-            rel_path = file_path.relative_to(repo_path)
-            if any(part in exclude_patterns for part in rel_path.parts):
-                continue
-            if any(part.startswith('.') for part in rel_path.parts):
-                continue
-            
-            # Calculate SHA256
-            sha256 = hashlib.sha256(file_path.read_bytes()).hexdigest()
-            lines.append(f"{sha256}  {rel_path.as_posix()}")
+            for file_path in sorted(repo_path.rglob('*')):
+                if file_path.is_dir():
+                    continue
+                
+                rel_path = file_path.relative_to(repo_path)
+                if any(part in exclude_patterns for part in rel_path.parts):
+                    continue
+                if any(part.startswith('.') for part in rel_path.parts):
+                    continue
+                if rel_path.name in exclude_files:
+                    continue
+                
+                sha256 = hashlib.sha256(file_path.read_bytes()).hexdigest()
+                lines.append(f"{sha256}  {rel_path.as_posix()}")
         
         return '\n'.join(lines) + '\n'
     
