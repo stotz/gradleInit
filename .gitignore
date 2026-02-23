@@ -93,15 +93,15 @@ desktop.ini
 # target/
 
 ##### Python #####
-# __pycache__/
-# *.pyc
-# *.pyo
-# *.pyd
-# .pytest_cache/
-# .mypy_cache/
-# .venv/
-# venv/
-# env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
 
 ##### Perl #####
 # blib/
