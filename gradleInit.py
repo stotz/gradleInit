@@ -31,10 +31,10 @@ from typing import Dict, List, Optional, Tuple, Any
 # Version & Constants
 # ============================================================================
 
-SCRIPT_VERSION = "1.8.0"
+SCRIPT_VERSION = "1.9.0"
 MODULES_REPO = "https://github.com/stotz/gradleInitModules.git"
 TEMPLATES_REPO = "https://github.com/stotz/gradleInitTemplates.git"
-MODULES_VERSION = "main"  # Use main branch (v1.3.0 tag doesn't exist yet)
+MODULES_VERSION = "main"  # Use main branch
 
 # Platform detection
 IS_WINDOWS = sys.platform.startswith('win')
@@ -46,6 +46,599 @@ SCOOP_SHIMS_DIR = os.path.join(SCOOP_DIR, 'shims') if SCOOP_DIR else None
 # Default Gradle version
 DEFAULT_GRADLE_VERSION = "9.3.1"
 GRADLE_VERSIONS_URL = "https://services.gradle.org/versions/all"
+
+# Security: Official public key for signed repositories
+# This key is used to verify official gradleInit templates and modules
+OFFICIAL_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
+PLACEHOLDER_WILL_BE_REPLACED_WITH_REAL_KEY
+-----END PUBLIC KEY-----"""
+
+# Trust levels
+TRUST_OFFICIAL = "official"      # Signed with embedded key
+TRUST_VERIFIED = "verified"      # Signed with user-imported key
+TRUST_UNVERIFIED = "unverified"  # No signature verification
+
+# Auto-install flag (set via --install-deps)
+AUTO_INSTALL_DEPS = '--install-deps' in sys.argv
+
+
+# ============================================================================
+# Package Management
+# ============================================================================
+
+def install_package(package_name: str) -> bool:
+    """
+    Install a Python package using pip.
+    
+    Args:
+        package_name: Name of the package to install
+    
+    Returns:
+        True if installation succeeded
+    """
+    print(f"[INFO] Installing package: {package_name}")
+    try:
+        result = subprocess.run(
+            [sys.executable, '-m', 'pip', 'install', package_name, '--break-system-packages'],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            print(f"[OK] Package '{package_name}' installed successfully")
+            return True
+        else:
+            # Try without --break-system-packages (older pip)
+            result = subprocess.run(
+                [sys.executable, '-m', 'pip', 'install', package_name],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                print(f"[OK] Package '{package_name}' installed successfully")
+                return True
+            print(f"[ERROR] Failed to install '{package_name}': {result.stderr}")
+            return False
+    except Exception as e:
+        print(f"[ERROR] Failed to install '{package_name}': {e}")
+        return False
+
+
+def prompt_install_package(package_name: str, feature_name: str) -> bool:
+    """
+    Prompt user to install a missing package.
+    
+    Args:
+        package_name: Name of the package to install
+        feature_name: Human-readable feature name that requires this package
+    
+    Returns:
+        True if package is now available
+    """
+    # Check if already installed
+    try:
+        __import__(package_name.split('[')[0])  # Handle extras like package[extra]
+        return True
+    except ImportError:
+        pass
+    
+    # Auto-install mode (CI)
+    if AUTO_INSTALL_DEPS:
+        return install_package(package_name)
+    
+    # Interactive prompt
+    print()
+    print(f"Package '{package_name}' is required for {feature_name}.")
+    try:
+        response = input("Install now? [Y/n]: ").strip().lower()
+    except EOFError:
+        response = 'n'
+    
+    if response in ['', 'y', 'yes']:
+        if install_package(package_name):
+            print()
+            print("[INFO] Please restart gradleInit to use the new package.")
+            sys.exit(0)
+        else:
+            return False
+    else:
+        print(f"[INFO] Skipped installation of '{package_name}'")
+        return False
+
+
+def check_and_install_dependencies() -> bool:
+    """
+    Check for required dependencies and offer to install missing ones.
+    
+    Returns:
+        True if all required dependencies are available
+    """
+    # Required packages: module_name -> pip_package_name
+    required = {
+        'toml': 'toml',
+        'jinja2': 'jinja2',
+    }
+    
+    # Optional packages
+    optional = {
+        'yaml': 'pyyaml',
+    }
+    
+    missing_required = []
+    missing_optional = []
+    
+    # Check required
+    for module_name, package_name in required.items():
+        try:
+            __import__(module_name)
+        except ImportError:
+            missing_required.append((module_name, package_name))
+    
+    # Check optional
+    for module_name, package_name in optional.items():
+        try:
+            __import__(module_name)
+        except ImportError:
+            missing_optional.append((module_name, package_name))
+    
+    # Handle missing required packages
+    if missing_required:
+        print()
+        print("=" * 60)
+        print("  Missing Required Dependencies")
+        print("=" * 60)
+        print()
+        
+        for module_name, package_name in missing_required:
+            print(f"  - {package_name}")
+        print()
+        
+        if AUTO_INSTALL_DEPS:
+            print("[INFO] Auto-installing required packages...")
+            all_installed = True
+            for module_name, package_name in missing_required:
+                if not install_package(package_name):
+                    all_installed = False
+            
+            if all_installed:
+                print()
+                print("[INFO] All packages installed. Please restart gradleInit.")
+                sys.exit(0)
+            else:
+                print()
+                print("[ERROR] Some packages failed to install.")
+                sys.exit(1)
+        else:
+            try:
+                response = input("Install required packages now? [Y/n]: ").strip().lower()
+            except EOFError:
+                response = 'n'
+            
+            if response in ['', 'y', 'yes']:
+                all_installed = True
+                for module_name, package_name in missing_required:
+                    if not install_package(package_name):
+                        all_installed = False
+                
+                if all_installed:
+                    print()
+                    print("[INFO] All packages installed. Please restart gradleInit.")
+                    sys.exit(0)
+                else:
+                    print()
+                    print("[ERROR] Some packages failed to install.")
+                    print("Install manually with:")
+                    for _, package_name in missing_required:
+                        print(f"  pip install {package_name} --break-system-packages")
+                    sys.exit(1)
+            else:
+                print()
+                print("Install manually with:")
+                for _, package_name in missing_required:
+                    print(f"  pip install {package_name} --break-system-packages")
+                print()
+                sys.exit(1)
+    
+    # Report optional missing (no install prompt)
+    if missing_optional:
+        # Only show note, don't spam on every run
+        pass
+    
+    return True
+
+
+# Check dependencies before importing
+check_and_install_dependencies()
+
+# Now safe to import required packages
+import toml
+import jinja2
+
+# Optional imports
+try:
+    import yaml
+    HAS_YAML = True
+except ImportError:
+    HAS_YAML = False
+
+
+# ============================================================================
+# Feature-Specific Package Checks
+# ============================================================================
+
+# Cryptography availability (checked lazily when needed)
+CRYPTOGRAPHY_AVAILABLE = False
+try:
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa, padding
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.exceptions import InvalidSignature
+    CRYPTOGRAPHY_AVAILABLE = True
+except ImportError:
+    pass
+
+
+def ensure_cryptography() -> bool:
+    """
+    Ensure cryptography package is available.
+    Prompts for installation if missing.
+    
+    Returns:
+        True if cryptography is available
+    """
+    global CRYPTOGRAPHY_AVAILABLE
+    
+    if CRYPTOGRAPHY_AVAILABLE:
+        return True
+    
+    if prompt_install_package('cryptography', 'security features (signing, verification)'):
+        # Try to import again
+        try:
+            from cryptography.hazmat.primitives import hashes, serialization
+            from cryptography.hazmat.primitives.asymmetric import rsa, padding
+            from cryptography.hazmat.backends import default_backend
+            from cryptography.exceptions import InvalidSignature
+            CRYPTOGRAPHY_AVAILABLE = True
+            return True
+        except ImportError:
+            pass
+    
+    return False
+
+
+class RepositorySecurity:
+    """
+    Handle repository signing and verification.
+    
+    Uses RSA-4096 with SHA-256 for signatures.
+    Requires 'cryptography' package for security features.
+    """
+    
+    KEY_SIZE = 4096
+    CHECKSUMS_FILE = "CHECKSUMS.sha256"
+    SIGNATURE_FILE = "CHECKSUMS.sig"
+    
+    def __init__(self, keys_dir: Optional[Path] = None):
+        """
+        Initialize security manager.
+        
+        Args:
+            keys_dir: Directory for storing keys. Defaults to ~/.gradleInit/keys/
+        """
+        if keys_dir is None:
+            keys_dir = Path.home() / '.gradleInit' / 'keys'
+        self.keys_dir = keys_dir
+    
+    @staticmethod
+    def is_available() -> bool:
+        """Check if cryptography package is available"""
+        return CRYPTOGRAPHY_AVAILABLE
+    
+    @staticmethod
+    def require_available() -> bool:
+        """
+        Ensure cryptography is available, prompt for installation if not.
+        
+        Returns:
+            True if available
+        
+        Raises:
+            RuntimeError if not available and user declined installation
+        """
+        if not ensure_cryptography():
+            raise RuntimeError(
+                "Security features require 'cryptography' package."
+            )
+        return True
+    
+    def generate_keypair(self, name: str) -> Tuple[Path, Path]:
+        """
+        Generate a new RSA keypair.
+        
+        Args:
+            name: Name for the keypair (e.g., "company")
+        
+        Returns:
+            Tuple of (private_key_path, public_key_path)
+        """
+        self.require_available()
+        
+        self.keys_dir.mkdir(parents=True, exist_ok=True)
+        
+        private_key_path = self.keys_dir / f"{name}.private.pem"
+        public_key_path = self.keys_dir / f"{name}.public.pem"
+        
+        # Check if already exists
+        if private_key_path.exists() or public_key_path.exists():
+            raise FileExistsError(f"Key '{name}' already exists")
+        
+        # Generate private key
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=self.KEY_SIZE,
+            backend=default_backend()
+        )
+        
+        # Serialize private key
+        private_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption()
+        )
+        
+        # Serialize public key
+        public_key = private_key.public_key()
+        public_pem = public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        
+        # Write keys
+        private_key_path.write_bytes(private_pem)
+        public_key_path.write_bytes(public_pem)
+        
+        # Set restrictive permissions on private key (Unix only)
+        if not IS_WINDOWS:
+            os.chmod(private_key_path, 0o600)
+        
+        return private_key_path, public_key_path
+    
+    def import_public_key(self, name: str, key_source: str) -> Path:
+        """
+        Import a public key from file or URL.
+        
+        Args:
+            name: Name for the key
+            key_source: Path or URL to public key PEM file
+        
+        Returns:
+            Path to imported key
+        """
+        self.require_available()
+        
+        self.keys_dir.mkdir(parents=True, exist_ok=True)
+        
+        public_key_path = self.keys_dir / f"{name}.public.pem"
+        
+        if public_key_path.exists():
+            raise FileExistsError(f"Key '{name}' already exists")
+        
+        # Load key content
+        if key_source.startswith('http://') or key_source.startswith('https://'):
+            import urllib.request
+            with urllib.request.urlopen(key_source, timeout=30) as response:
+                key_pem = response.read()
+        else:
+            key_pem = Path(key_source).read_bytes()
+        
+        # Validate it's a valid public key
+        try:
+            serialization.load_pem_public_key(key_pem, backend=default_backend())
+        except Exception as e:
+            raise ValueError(f"Invalid public key: {e}")
+        
+        # Save key
+        public_key_path.write_bytes(key_pem)
+        
+        return public_key_path
+    
+    def get_public_key(self, name: str) -> Optional[bytes]:
+        """
+        Get public key bytes by name.
+        
+        Args:
+            name: Key name, or "official" for embedded key
+        
+        Returns:
+            PEM-encoded public key bytes, or None if not found
+        """
+        if name == "official":
+            return OFFICIAL_PUBLIC_KEY.encode('utf-8')
+        
+        key_path = self.keys_dir / f"{name}.public.pem"
+        if key_path.exists():
+            return key_path.read_bytes()
+        
+        return None
+    
+    def list_keys(self) -> List[Dict[str, Any]]:
+        """
+        List all available keys.
+        
+        Returns:
+            List of dicts with key info
+        """
+        keys = []
+        
+        # Official key
+        keys.append({
+            'name': 'official',
+            'type': 'embedded',
+            'path': None,
+            'has_private': False
+        })
+        
+        # User keys
+        if self.keys_dir.exists():
+            for key_file in self.keys_dir.glob('*.public.pem'):
+                name = key_file.stem.replace('.public', '')
+                private_exists = (self.keys_dir / f"{name}.private.pem").exists()
+                keys.append({
+                    'name': name,
+                    'type': 'imported' if not private_exists else 'generated',
+                    'path': str(key_file),
+                    'has_private': private_exists
+                })
+        
+        return keys
+    
+    def sign_repository(self, repo_path: Path, key_name: str) -> Tuple[Path, Path]:
+        """
+        Sign a repository by creating checksums and signature.
+        
+        Args:
+            repo_path: Path to repository root
+            key_name: Name of private key to use
+        
+        Returns:
+            Tuple of (checksums_path, signature_path)
+        """
+        self.require_available()
+        
+        # Load private key
+        private_key_path = self.keys_dir / f"{key_name}.private.pem"
+        if not private_key_path.exists():
+            raise FileNotFoundError(f"Private key '{key_name}' not found")
+        
+        private_key = serialization.load_pem_private_key(
+            private_key_path.read_bytes(),
+            password=None,
+            backend=default_backend()
+        )
+        
+        # Generate checksums for all relevant files
+        checksums_content = self._generate_checksums(repo_path)
+        
+        # Write checksums file
+        checksums_path = repo_path / self.CHECKSUMS_FILE
+        checksums_path.write_text(checksums_content, encoding='utf-8')
+        
+        # Sign checksums
+        signature = private_key.sign(
+            checksums_content.encode('utf-8'),
+            padding.PKCS1v15(),
+            hashes.SHA256()
+        )
+        
+        # Write signature
+        signature_path = repo_path / self.SIGNATURE_FILE
+        signature_path.write_bytes(signature)
+        
+        return checksums_path, signature_path
+    
+    def verify_repository(self, repo_path: Path, key_name: str) -> Tuple[bool, str]:
+        """
+        Verify repository signature.
+        
+        Args:
+            repo_path: Path to repository root
+            key_name: Name of public key to use
+        
+        Returns:
+            Tuple of (success, message)
+        """
+        self.require_available()
+        
+        checksums_path = repo_path / self.CHECKSUMS_FILE
+        signature_path = repo_path / self.SIGNATURE_FILE
+        
+        # Check files exist
+        if not checksums_path.exists():
+            return False, f"Checksums file not found: {self.CHECKSUMS_FILE}"
+        if not signature_path.exists():
+            return False, f"Signature file not found: {self.SIGNATURE_FILE}"
+        
+        # Load public key
+        public_key_pem = self.get_public_key(key_name)
+        if public_key_pem is None:
+            return False, f"Public key '{key_name}' not found"
+        
+        try:
+            public_key = serialization.load_pem_public_key(
+                public_key_pem,
+                backend=default_backend()
+            )
+        except Exception as e:
+            return False, f"Invalid public key: {e}"
+        
+        # Read checksums and signature
+        checksums_content = checksums_path.read_bytes()
+        signature = signature_path.read_bytes()
+        
+        # Verify signature
+        try:
+            public_key.verify(
+                signature,
+                checksums_content,
+                padding.PKCS1v15(),
+                hashes.SHA256()
+            )
+        except InvalidSignature:
+            return False, "Signature verification FAILED - repository may be tampered"
+        except Exception as e:
+            return False, f"Verification error: {e}"
+        
+        # Verify individual file checksums
+        valid, message = self._verify_checksums(repo_path, checksums_content.decode('utf-8'))
+        if not valid:
+            return False, message
+        
+        return True, "Signature verified"
+    
+    def _generate_checksums(self, repo_path: Path) -> str:
+        """Generate SHA256 checksums for repository files"""
+        lines = []
+        
+        # Files to checksum (exclude git, checksums, signature)
+        exclude_patterns = {'.git', '__pycache__', self.CHECKSUMS_FILE, self.SIGNATURE_FILE}
+        
+        for file_path in sorted(repo_path.rglob('*')):
+            if file_path.is_dir():
+                continue
+            
+            # Skip excluded
+            rel_path = file_path.relative_to(repo_path)
+            if any(part in exclude_patterns for part in rel_path.parts):
+                continue
+            if any(part.startswith('.') for part in rel_path.parts):
+                continue
+            
+            # Calculate SHA256
+            sha256 = hashlib.sha256(file_path.read_bytes()).hexdigest()
+            lines.append(f"{sha256}  {rel_path.as_posix()}")
+        
+        return '\n'.join(lines) + '\n'
+    
+    def _verify_checksums(self, repo_path: Path, checksums_content: str) -> Tuple[bool, str]:
+        """Verify individual file checksums"""
+        for line in checksums_content.strip().split('\n'):
+            if not line.strip():
+                continue
+            
+            parts = line.split('  ', 1)
+            if len(parts) != 2:
+                continue
+            
+            expected_hash, rel_path = parts
+            file_path = repo_path / rel_path
+            
+            if not file_path.exists():
+                return False, f"Missing file: {rel_path}"
+            
+            actual_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+            if actual_hash != expected_hash:
+                return False, f"Checksum mismatch: {rel_path}"
+        
+        return True, "All checksums valid"
 
 
 # ============================================================================
@@ -336,89 +929,6 @@ def uninstall_scoop_shims() -> bool:
     except Exception as e:
         print_error(f"Failed to uninstall Scoop shims: {e}")
         return False
-
-
-# ============================================================================
-# Dependency Check
-# ============================================================================
-
-def check_dependencies():
-    """Check and report missing Python dependencies"""
-
-    missing = []
-    optional_missing = []
-
-    # Required packages
-    required = {
-        'toml': 'toml',
-        'jinja2': 'jinja2',
-    }
-
-    # Optional packages (improve functionality)
-    optional = {
-        'yaml': 'pyyaml',
-    }
-
-    # Check required
-    for module_name, package_name in required.items():
-        try:
-            __import__(module_name)
-        except ImportError:
-            missing.append(package_name)
-
-    # Check optional
-    for module_name, package_name in optional.items():
-        try:
-            __import__(module_name)
-        except ImportError:
-            optional_missing.append(package_name)
-
-    # Report missing dependencies
-    if missing:
-        print("=" * 70)
-        print("  Missing Required Dependencies")
-        print("=" * 70)
-        print()
-        print("gradleInit requires the following Python packages:")
-        for pkg in missing:
-            print(f"  * {pkg}")
-        print()
-        print("Install with:")
-        print()
-        print(f"  pip install {' '.join(missing)}")
-        print()
-        print("Or install for current user only:")
-        print()
-        print(f"  pip install --user {' '.join(missing)}")
-        print()
-        if optional_missing:
-            print("Optional packages (recommended):")
-            print(f"  pip install {' '.join(optional_missing)}")
-            print()
-        print("=" * 70)
-        sys.exit(1)
-
-    if optional_missing:
-        print(f"Note: Optional package not installed: {', '.join(optional_missing)}")
-        print(f"      For better YAML support: pip install {' '.join(optional_missing)}")
-        print()
-
-    return True
-
-
-# Check dependencies before importing
-check_dependencies()
-
-# Now safe to import
-import toml
-import jinja2
-
-try:
-    import yaml
-
-    HAS_YAML = True
-except ImportError:
-    HAS_YAML = False
 
 
 # ============================================================================
@@ -874,8 +1384,14 @@ class VersionConstraintChecker:
             return ('lt', constraint[1:].strip())
         if constraint.endswith('.x') or constraint.endswith('.*'):
             return ('wildcard', constraint[:-2])
-        # Exact version
-        return ('exact', constraint)
+        
+        # Check if it looks like a version number (exact pin)
+        import re
+        if re.match(r'^\d+(\.\d+)*(-[\w.]+)?$', constraint):
+            return ('exact', constraint)
+        
+        # Unknown constraint
+        return ('unknown', constraint)
     
     @staticmethod
     def parse_version(version: str) -> Tuple[int, int, int, str]:
@@ -1092,7 +1608,14 @@ class VersionManager:
                 continue
             
             # Exact version constraint
-            ctype, _ = VersionConstraintChecker.parse_constraint(entry.constraint)
+            ctype, cvalue = VersionConstraintChecker.parse_constraint(entry.constraint)
+            
+            if ctype == 'unknown':
+                result['status'] = 'UNKNOWN'
+                result['message'] = f'invalid constraint @{entry.constraint}'
+                results.append(result)
+                continue
+            
             if ctype == 'exact':
                 result['status'] = 'PINNED'
                 result['message'] = f'@{entry.constraint}'
@@ -2077,6 +2600,10 @@ class DynamicCLIBuilder:
         parser.add_argument('-v', '--version', action='version',
                           version=f'gradleInit v{SCRIPT_VERSION}')
 
+        # Package management for CI
+        parser.add_argument('--install-deps', action='store_true',
+                          help='Auto-install missing Python packages (for CI)')
+
         # Scoop integration (only show if SCOOP env is set)
         if SCOOP_DIR:
             if are_scoop_shims_installed():
@@ -2169,6 +2696,54 @@ class DynamicCLIBuilder:
                                       help='Apply updates without confirmation')
         versions_parser.add_argument('dependency', nargs='?',
                                       help='Specific dependency to update (optional)')
+
+        # KEYS COMMAND (Security)
+        keys_parser = subparsers.add_parser('keys',
+                                             help='Manage signing keys')
+        keys_parser.add_argument('--generate', metavar='NAME',
+                                  help='Generate new keypair')
+        keys_parser.add_argument('--import', dest='import_key', nargs=2,
+                                  metavar=('NAME', 'PATH_OR_URL'),
+                                  help='Import public key')
+        keys_parser.add_argument('--export', metavar='NAME',
+                                  help='Export public key (for sharing)')
+        keys_parser.add_argument('--list', action='store_true',
+                                  help='List all keys')
+        keys_parser.add_argument('--delete', metavar='NAME',
+                                  help='Delete a key')
+
+        # SIGN COMMAND (Security)
+        sign_parser = subparsers.add_parser('sign',
+                                             help='Sign a repository')
+        sign_parser.add_argument('--repo', required=True,
+                                  help='Path to repository')
+        sign_parser.add_argument('--key', required=True,
+                                  help='Name of private key to use')
+
+        # VERIFY COMMAND (Security)
+        verify_parser = subparsers.add_parser('verify',
+                                               help='Verify repository signature')
+        verify_parser.add_argument('--repo', required=True,
+                                    help='Path to repository')
+        verify_parser.add_argument('--key',
+                                    help='Name of public key (default: official)')
+
+        # MODULES COMMAND
+        modules_parser = subparsers.add_parser('modules',
+                                                help='Manage module repositories')
+        modules_parser.add_argument('--list', action='store_true',
+                                     help='List module repositories')
+        modules_parser.add_argument('--add-repo', nargs=2,
+                                     metavar=('NAME', 'URL'),
+                                     help='Add module repository')
+        modules_parser.add_argument('--remove-repo', metavar='NAME',
+                                     help='Remove module repository')
+        modules_parser.add_argument('--update', action='store_true',
+                                     help='Update all module repositories')
+        modules_parser.add_argument('--key', metavar='KEYNAME',
+                                     help='Key for signature verification')
+        modules_parser.add_argument('--unverified', action='store_true',
+                                     help='Add repository without signature verification')
 
         # SUBPROJECT COMMAND
         subproject_parser = subparsers.add_parser('subproject',
@@ -4377,6 +4952,7 @@ def handle_versions_command(args: argparse.Namespace) -> int:
     skipped = []
     current = []
     violations = []
+    unknown = []
     errors = []
     
     for r in results:
@@ -4390,6 +4966,8 @@ def handle_versions_command(args: argparse.Namespace) -> int:
             current.append(r)
         elif r['status'] == 'VIOLATE':
             violations.append(r)
+        elif r['status'] == 'UNKNOWN':
+            unknown.append(r)
         else:
             errors.append(r)
     
@@ -4411,6 +4989,8 @@ def handle_versions_command(args: argparse.Namespace) -> int:
             print(f"  [SKIP]    {name}: {curr} ({r['message']})")
         elif r['status'] == 'VIOLATE':
             print(f"  [VIOLATE] {name}: {r['message']}")
+        elif r['status'] == 'UNKNOWN':
+            print(f"  [UNKNOWN] {name}: {curr} ({r['message']})")
         elif r['status'] == 'NO_API':
             print(f"  [NO_API]  {name}: {curr} (Maven Central API not available)")
         else:
@@ -4430,6 +5010,8 @@ def handle_versions_command(args: argparse.Namespace) -> int:
         summary_parts.append(f"{len(current)} current")
     if violations:
         summary_parts.append(f"{len(violations)} constraint violations")
+    if unknown:
+        summary_parts.append(f"{len(unknown)} unknown constraints")
     
     print(', '.join(summary_parts))
     
@@ -4465,6 +5047,269 @@ def handle_versions_command(args: argparse.Namespace) -> int:
             print("Run 'gradleInit versions --update' to apply updates.")
     
     return 0
+
+
+def handle_keys_command(args: argparse.Namespace) -> int:
+    """Handle keys command - Manage signing keys."""
+    security = RepositorySecurity()
+    
+    if args.generate:
+        if not RepositorySecurity.is_available():
+            print_error("Security features require 'cryptography' package")
+            print_info("Install with: pip install cryptography")
+            return 1
+        
+        try:
+            private_path, public_path = security.generate_keypair(args.generate)
+            print_success(f"Generated keypair '{args.generate}'")
+            print_info(f"Private key: {private_path}")
+            print_info(f"Public key:  {public_path}")
+            print()
+            print_warning("Keep your private key secure!")
+            print_info("Share the public key with users who need to verify your signatures.")
+        except FileExistsError as e:
+            print_error(str(e))
+            return 1
+        except Exception as e:
+            print_error(f"Failed to generate keypair: {e}")
+            return 1
+        return 0
+    
+    if args.import_key:
+        if not RepositorySecurity.is_available():
+            print_error("Security features require 'cryptography' package")
+            print_info("Install with: pip install cryptography")
+            return 1
+        
+        name, source = args.import_key
+        try:
+            key_path = security.import_public_key(name, source)
+            print_success(f"Imported public key '{name}'")
+            print_info(f"Saved to: {key_path}")
+        except FileExistsError as e:
+            print_error(str(e))
+            return 1
+        except Exception as e:
+            print_error(f"Failed to import key: {e}")
+            return 1
+        return 0
+    
+    if args.export:
+        key_pem = security.get_public_key(args.export)
+        if key_pem is None:
+            print_error(f"Key '{args.export}' not found")
+            return 1
+        
+        print(key_pem.decode('utf-8'))
+        return 0
+    
+    if args.delete:
+        if args.delete == 'official':
+            print_error("Cannot delete embedded official key")
+            return 1
+        
+        deleted = False
+        for suffix in ['.private.pem', '.public.pem']:
+            key_path = security.keys_dir / f"{args.delete}{suffix}"
+            if key_path.exists():
+                key_path.unlink()
+                deleted = True
+        
+        if deleted:
+            print_success(f"Deleted key '{args.delete}'")
+        else:
+            print_error(f"Key '{args.delete}' not found")
+            return 1
+        return 0
+    
+    # Default: list keys
+    keys = security.list_keys()
+    
+    print("Available keys:")
+    print()
+    for key in keys:
+        key_type = key['type']
+        has_private = " (can sign)" if key['has_private'] else ""
+        if key['name'] == 'official':
+            print(f"  official  [embedded] - Official gradleInit key")
+        else:
+            print(f"  {key['name']}  [{key_type}]{has_private}")
+    
+    return 0
+
+
+def handle_sign_command(args: argparse.Namespace) -> int:
+    """Handle sign command - Sign a repository."""
+    if not RepositorySecurity.is_available():
+        print_error("Security features require 'cryptography' package")
+        print_info("Install with: pip install cryptography")
+        return 1
+    
+    security = RepositorySecurity()
+    repo_path = Path(args.repo).resolve()
+    
+    if not repo_path.exists():
+        print_error(f"Repository not found: {repo_path}")
+        return 1
+    
+    try:
+        checksums_path, sig_path = security.sign_repository(repo_path, args.key)
+        print_success(f"Repository signed with key '{args.key}'")
+        print_info(f"Checksums: {checksums_path}")
+        print_info(f"Signature: {sig_path}")
+        print()
+        print_info("Commit these files to your repository:")
+        print(f"  git add {RepositorySecurity.CHECKSUMS_FILE} {RepositorySecurity.SIGNATURE_FILE}")
+        print("  git commit -m 'Signed release'")
+    except FileNotFoundError as e:
+        print_error(str(e))
+        return 1
+    except Exception as e:
+        print_error(f"Failed to sign repository: {e}")
+        return 1
+    
+    return 0
+
+
+def handle_verify_command(args: argparse.Namespace) -> int:
+    """Handle verify command - Verify repository signature."""
+    if not RepositorySecurity.is_available():
+        print_error("Security features require 'cryptography' package")
+        print_info("Install with: pip install cryptography")
+        return 1
+    
+    security = RepositorySecurity()
+    repo_path = Path(args.repo).resolve()
+    key_name = args.key or 'official'
+    
+    if not repo_path.exists():
+        print_error(f"Repository not found: {repo_path}")
+        return 1
+    
+    success, message = security.verify_repository(repo_path, key_name)
+    
+    if success:
+        print_success(f"Verification PASSED: {message}")
+        return 0
+    else:
+        print_error(f"Verification FAILED: {message}")
+        return 1
+
+
+def handle_modules_command(args: argparse.Namespace, paths: 'GradleInitPaths') -> int:
+    """Handle modules command - Manage module repositories."""
+    
+    # Load config
+    config = load_config(paths.config_file)
+    
+    if 'module_repositories' not in config:
+        config['module_repositories'] = {
+            'official': {
+                'url': MODULES_REPO,
+                'key': 'official'
+            }
+        }
+    
+    if args.list:
+        print("Module repositories:")
+        print()
+        for name, repo_info in config.get('module_repositories', {}).items():
+            url = repo_info.get('url', 'N/A')
+            key = repo_info.get('key', 'unverified')
+            trust = repo_info.get('trust', 'verified' if key else 'unverified')
+            print(f"  {name}")
+            print(f"    URL: {url}")
+            print(f"    Trust: {trust} (key: {key})")
+            print()
+        return 0
+    
+    if args.add_repo:
+        name, url = args.add_repo
+        
+        if name in config.get('module_repositories', {}):
+            print_error(f"Repository '{name}' already exists")
+            return 1
+        
+        repo_config = {'url': url}
+        
+        if args.key:
+            repo_config['key'] = args.key
+            repo_config['trust'] = TRUST_VERIFIED
+        elif args.unverified:
+            repo_config['trust'] = TRUST_UNVERIFIED
+            print()
+            print_warning("WARNING: Adding UNVERIFIED repository")
+            print_warning("Code from this repository will be executed.")
+            print_warning("Only add repositories you trust completely.")
+            print()
+            response = input("Type 'yes' to continue: ").strip()
+            if response != 'yes':
+                print("Aborted.")
+                return 1
+        else:
+            print_error("Must specify --key KEYNAME or --unverified")
+            return 1
+        
+        config['module_repositories'][name] = repo_config
+        
+        # Save config
+        save_config(paths.config_file, config)
+        print_success(f"Added repository '{name}'")
+        return 0
+    
+    if args.remove_repo:
+        name = args.remove_repo
+        
+        if name == 'official':
+            print_error("Cannot remove official repository")
+            return 1
+        
+        if name not in config.get('module_repositories', {}):
+            print_error(f"Repository '{name}' not found")
+            return 1
+        
+        del config['module_repositories'][name]
+        save_config(paths.config_file, config)
+        print_success(f"Removed repository '{name}'")
+        return 0
+    
+    if args.update:
+        print("Updating module repositories...")
+        # TODO: Implement update with signature verification
+        print_info("Not yet implemented")
+        return 0
+    
+    # Default: list
+    return handle_modules_command(
+        argparse.Namespace(list=True, add_repo=None, remove_repo=None, update=False, key=None, unverified=False),
+        paths
+    )
+
+
+def save_config(config_file: Path, config: Dict[str, Any]):
+    """Save configuration to TOML file."""
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    lines = []
+    
+    for section, values in config.items():
+        lines.append(f"[{section}]")
+        if isinstance(values, dict):
+            for key, value in values.items():
+                if isinstance(value, dict):
+                    # Inline table for nested dicts
+                    inner = ', '.join(f'{k} = "{v}"' if isinstance(v, str) else f'{k} = {v}' 
+                                     for k, v in value.items())
+                    lines.append(f'{key} = {{ {inner} }}')
+                elif isinstance(value, str):
+                    lines.append(f'{key} = "{value}"')
+                elif isinstance(value, bool):
+                    lines.append(f'{key} = {str(value).lower()}')
+                else:
+                    lines.append(f'{key} = {value}')
+        lines.append('')
+    
+    config_file.write_text('\n'.join(lines), encoding='utf-8')
 
 
 # ============================================================================
@@ -4608,6 +5453,18 @@ def main():
 
     elif args.command == 'versions':
         return handle_versions_command(args)
+
+    elif args.command == 'keys':
+        return handle_keys_command(args)
+
+    elif args.command == 'sign':
+        return handle_sign_command(args)
+
+    elif args.command == 'verify':
+        return handle_verify_command(args)
+
+    elif args.command == 'modules':
+        return handle_modules_command(args, paths)
 
     return 0
 
