@@ -50,7 +50,18 @@ GRADLE_VERSIONS_URL = "https://services.gradle.org/versions/all"
 # Security: Official public key for signed repositories
 # This key is used to verify official gradleInit templates and modules
 OFFICIAL_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
-PLACEHOLDER_WILL_BE_REPLACED_WITH_REAL_KEY
+MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAlt9SOWupfyitlHl+IEn2
+nNJCo5PrsY9WMRYT2VnTQ3lG7zgUflH/F5QlLx8mdQQvzwv2CG71F+jw6ic8O/oi
+s6xfu12FR/XT+SWMAl/VVvd/j/sSML3vI9z6wRiYBjUu6KI5ea+bIv02OUIyGjwn
+kCbTV8nRLyouyQxlH8YoYPqATU9eWIfyoUyGW8SwSDu3k5ODokWbR2FhPQFjOLLL
+miFGwLlvNjv89/L0i/owLi8gvguXgayGPVCv/pRi+wRFptPIuGLxl0679bbKXZE6
+D3isXDP3kXVjtXaJqTXzlOOojAitEJs+SsLfYjPHhNYHS7SfsTyZXNNcumGPUEKn
+YtZ+UE9spuXTiGviX5qNm8OM8+9s5iahD9LGF/JE6BTj1he1dYTiaXwvA02SNiMr
+FvPbnBmEIIyAIJGG3AX9qNiUQ5r3CQ//YL+zU+YvP8YMoluoweYkhiYHFLPHwfpY
+rruNXZpQ/7BJstSSvf5qyKGAVzcW06dbgLWbYyZKjQDLpHo4zKcHQUSmTjcJE63W
+TSVwx1gJTpVRwRH0IFhv6P4mZKDNHYqi553HYq1kYa+putLmqxXaGu6cWdvXrnQN
+noJzxXwi/4/iZL+f93IE5/agW31QWtHTa83yWwCOOYSeGEUTlOXxpow49zuEKjiS
+0BT5KcR1e6la8REY7FO8ErkCAwEAAQ==
 -----END PUBLIC KEY-----"""
 
 # Trust levels
@@ -369,7 +380,9 @@ class RepositorySecurity:
         
         # Check if already exists
         if private_key_path.exists() or public_key_path.exists():
-            raise FileExistsError(f"Key '{name}' already exists")
+            raise FileExistsError(
+                f"Key '{name}' already exists at\n{private_key_path}\n{public_key_path}"
+            )
         
         # Generate private key
         private_key = rsa.generate_private_key(
@@ -518,13 +531,16 @@ class RepositorySecurity:
         # Generate checksums for all relevant files
         checksums_content = self._generate_checksums(repo_path)
         
-        # Write checksums file
+        # Convert to bytes with explicit LF (cross-platform consistency)
+        checksums_bytes = checksums_content.encode('utf-8')
+        
+        # Write checksums file (binary mode to preserve LF)
         checksums_path = repo_path / self.CHECKSUMS_FILE
-        checksums_path.write_text(checksums_content, encoding='utf-8')
+        checksums_path.write_bytes(checksums_bytes)
         
         # Sign checksums
         signature = private_key.sign(
-            checksums_content.encode('utf-8'),
+            checksums_bytes,
             padding.PKCS1v15(),
             hashes.SHA256()
         )
@@ -5054,9 +5070,8 @@ def handle_keys_command(args: argparse.Namespace) -> int:
     security = RepositorySecurity()
     
     if args.generate:
-        if not RepositorySecurity.is_available():
+        if not ensure_cryptography():
             print_error("Security features require 'cryptography' package")
-            print_info("Install with: pip install cryptography")
             return 1
         
         try:
@@ -5076,9 +5091,8 @@ def handle_keys_command(args: argparse.Namespace) -> int:
         return 0
     
     if args.import_key:
-        if not RepositorySecurity.is_available():
+        if not ensure_cryptography():
             print_error("Security features require 'cryptography' package")
-            print_info("Install with: pip install cryptography")
             return 1
         
         name, source = args.import_key
@@ -5140,9 +5154,8 @@ def handle_keys_command(args: argparse.Namespace) -> int:
 
 def handle_sign_command(args: argparse.Namespace) -> int:
     """Handle sign command - Sign a repository."""
-    if not RepositorySecurity.is_available():
+    if not ensure_cryptography():
         print_error("Security features require 'cryptography' package")
-        print_info("Install with: pip install cryptography")
         return 1
     
     security = RepositorySecurity()
@@ -5173,9 +5186,8 @@ def handle_sign_command(args: argparse.Namespace) -> int:
 
 def handle_verify_command(args: argparse.Namespace) -> int:
     """Handle verify command - Verify repository signature."""
-    if not RepositorySecurity.is_available():
+    if not ensure_cryptography():
         print_error("Security features require 'cryptography' package")
-        print_info("Install with: pip install cryptography")
         return 1
     
     security = RepositorySecurity()
