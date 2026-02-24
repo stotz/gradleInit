@@ -1201,6 +1201,12 @@ class ModuleLoader:
             return False
 
         # First run - offer to download modules
+        # Guard against non-interactive environments (CI, piped input)
+        if not sys.stdin.isatty():
+            print_info("Non-interactive mode detected - skipping module prompt")
+            print_info("Run: gradleInit.py --download-modules")
+            return False
+
         self._show_modules_prompt()
 
         response = input("Download optional modules? [Y/n]: ").strip().lower()
@@ -1231,7 +1237,7 @@ class ModuleLoader:
         return (
                 self.modules_dir.exists() and
                 (self.modules_dir / '.git').exists() and
-                (self.modules_dir / 'dependencies').exists()
+                (self.modules_dir / 'resolvers').exists()
         )
 
     def _download_modules(self) -> bool:
@@ -1296,7 +1302,7 @@ class ModuleLoader:
 
             # Maven Central
             try:
-                import dependencies.maven_central
+                import resolvers.maven_central
                 self.maven_central_available = True
                 features_enabled.append("Maven Central")
             except ImportError:
@@ -1304,7 +1310,7 @@ class ModuleLoader:
 
             # Spring Boot BOM
             try:
-                import dependencies.spring_boot
+                import resolvers.spring_boot
                 self.spring_boot_available = True
                 features_enabled.append("Spring Boot BOM")
             except ImportError:
@@ -1312,7 +1318,7 @@ class ModuleLoader:
 
             # Update Manager
             try:
-                import dependencies.updater
+                import resolvers.updater
                 self.updater_available = True
                 features_enabled.append("Update Manager")
             except ImportError:
@@ -4993,7 +4999,7 @@ def handle_versions_command(args: argparse.Namespace) -> int:
         if paths.modules_dir.exists():
             sys.path.insert(0, str(paths.modules_dir))
             try:
-                from maven_central import MavenCentral
+                from resolvers.maven_central import MavenCentral
                 maven_central = MavenCentral()
             except ImportError:
                 pass
