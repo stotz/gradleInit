@@ -610,20 +610,13 @@ class RepositorySecurity:
         
         return True, "Signature verified"
     
-    def _get_git_blob_hash(self, repo_path: Path, rel_path: str) -> Optional[str]:
-        """
-        Get SHA256 hash of file content as git sees it (normalized line endings).
-        Uses git's internal blob hash for consistency across platforms.
-        """
+    def _get_file_hash(self, repo_path: Path, rel_path: str) -> Optional[str]:
+        """Get SHA256 hash of file content."""
         file_path = repo_path / rel_path
         if not file_path.exists():
             return None
         
-        # Read content and normalize line endings to LF
-        content = file_path.read_bytes()
-        normalized = content.replace(b'\r\n', b'\n')
-        
-        return hashlib.sha256(normalized).hexdigest()
+        return hashlib.sha256(file_path.read_bytes()).hexdigest()
     
     def _generate_checksums(self, repo_path: Path) -> str:
         """Generate SHA256 checksums for repository files tracked by git"""
@@ -656,7 +649,7 @@ class RepositorySecurity:
                 
                 file_path = repo_path / rel_path_str
                 if file_path.exists() and file_path.is_file():
-                    sha256 = self._get_git_blob_hash(repo_path, rel_path_str)
+                    sha256 = self._get_file_hash(repo_path, rel_path_str)
                     if sha256:
                         # Use posix path for cross-platform consistency
                         lines.append(f"{sha256}  {Path(rel_path_str).as_posix()}")
@@ -676,7 +669,7 @@ class RepositorySecurity:
                 if rel_path.name in exclude_files:
                     continue
                 
-                sha256 = self._get_git_blob_hash(repo_path, rel_path.as_posix())
+                sha256 = self._get_file_hash(repo_path, rel_path.as_posix())
                 if sha256:
                     lines.append(f"{sha256}  {rel_path.as_posix()}")
         
@@ -698,7 +691,7 @@ class RepositorySecurity:
             if not file_path.exists():
                 return False, f"Missing file: {rel_path}"
             
-            actual_hash = self._get_git_blob_hash(repo_path, rel_path)
+            actual_hash = self._get_file_hash(repo_path, rel_path)
             if actual_hash != expected_hash:
                 return False, f"Checksum mismatch: {rel_path}"
         
