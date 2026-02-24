@@ -72,7 +72,7 @@ export JDK_VERSION="21"
 # All ENV variables automatically applied!
 ```
 
-### Example 2: Company Projects (Entris Banking)
+### Example 2: Company Projects
 
 **~/.bashrc or ~/.zshrc:**
 
@@ -115,7 +115,7 @@ function gradle-env-work() {
     export GRADLE_INIT_TEMPLATE="https://github.com/company/template.git"
     export GRADLE_INIT_GROUP="com.company"
     export GRADLE_INIT_AUTHOR="Hans Muster"
-    export GRADLE_INIT_EMAIL="urs.stotz@company.com"
+    export GRADLE_INIT_EMAIL="hans.muster@company.com"
     export GRADLE_INIT_COMPANY="My Company Inc."
     export GRADLE_INIT_LICENSE="Proprietary"
     echo "✓ Switched to work environment"
@@ -459,7 +459,7 @@ cat debug-project/build.gradle.kts
 
 ---
 
-**Complete example for Entris Banking:**
+**Complete example for a company setup:**
 
 ```bash
 # ~/.bashrc

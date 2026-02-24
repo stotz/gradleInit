@@ -23,6 +23,7 @@ A comprehensive single-file Python tool for creating professional Kotlin/Gradle 
 - [Templates](#templates)
 - [Advanced Features](#advanced-features)
 - [CLI Reference](#cli-reference)
+- [Documents](#documents)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
 
@@ -133,6 +134,8 @@ my-app/
 - **Python 3.7+**
 - **Git** (for template cloning)
 - **Java/JDK** (to run Gradle)
+
+**Windows:** Works with Git Bash, PowerShell, or CMD. Use `python gradleInit.py` instead of `./gradleInit.py`.
 
 ### Install Dependencies
 
@@ -831,6 +834,16 @@ Manage configuration.
 # Initialize config
 ./gradleInit.py config --init
 ```
+
+---
+
+## Documents
+
+- [Enhanced Template Hint System](docs/ENHANCED_HINTS_GUIDE.md) - Inline hint syntax `@@` for self-documenting templates
+- [Jinja2 Template Features](docs/JINJA2_FEATURES.md) - Available filters, functions, and variables in templates
+- [Environment Variables](docs/ENV_VARIABLES.md) - `GRADLE_INIT_*` environment variable configuration
+- [Security](docs/SECURITY.md) - Repository signing and verification (RSA-4096, SHA-256)
+- [Repositories](docs/REPOSITORIES.md) - Overview of the three coordinated repositories
 
 ---
 
