@@ -1248,6 +1248,20 @@ class ModuleLoader:
             # Create parent directory
             self.modules_dir.parent.mkdir(parents=True, exist_ok=True)
 
+            # Check if directory exists but is not a valid git repo
+            if self.modules_dir.exists():
+                git_dir = self.modules_dir / '.git'
+                if not git_dir.exists():
+                    print_error(f"Directory exists but is not a Git repository:")
+                    print_error(f"  {self.modules_dir}")
+                    print()
+                    print_info("To fix this, remove the directory and try again:")
+                    print_info(f"  rm -rf \"{self.modules_dir}\"")
+                    print_info("  gradleInit --download-modules")
+                    print()
+                    print_warning("Continuing without advanced features")
+                    return False
+
             # Clone repository
             cmd = ['git', 'clone', '--depth', '1']
 
@@ -1260,7 +1274,17 @@ class ModuleLoader:
             result = subprocess.run(cmd, capture_output=True, text=True)
 
             if result.returncode != 0:
-                print_error(f"Failed to download modules: {result.stderr}")
+                # Check for common error: directory already exists
+                if 'already exists' in result.stderr:
+                    print_error(f"Directory already exists and is not empty:")
+                    print_error(f"  {self.modules_dir}")
+                    print()
+                    print_info("To fix this, remove the directory and try again:")
+                    print_info(f"  rm -rf \"{self.modules_dir}\"")
+                    print_info("  gradleInit --download-modules")
+                else:
+                    print_error(f"Failed to download modules: {result.stderr.strip()}")
+                print()
                 print_warning("Continuing without advanced features")
                 return False
 
