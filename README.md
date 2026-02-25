@@ -78,7 +78,7 @@ pip install toml jinja2 pyyaml
 
 # 2. Download templates and modules
 ./gradleInit.py templates --update
-./gradleInit.py --download-modules
+./gradleInit.py modules --download
 
 # 3. Create project
 ./gradleInit.py init my-app --template kotlin-single --group com.example
@@ -123,7 +123,7 @@ chmod +x gradleInit.py
 ./gradleInit.py templates --update
 
 # Download optional modules (Maven Central resolver)
-./gradleInit.py --download-modules
+./gradleInit.py modules --download
 
 # Verify setup
 ./gradleInit.py templates --list
@@ -234,7 +234,7 @@ Modules provide optional features like Maven Central version resolution.
 #### Download Modules
 
 ```bash
-./gradleInit.py --download-modules
+./gradleInit.py modules --download
 ```
 
 Downloads modules from https://github.com/stotz/gradleInitModules to `~/.gradleInit/modules/`.
@@ -252,13 +252,13 @@ Downloads modules from https://github.com/stotz/gradleInitModules to `~/.gradleI
 [ERROR]   C:\Users\User\.gradleInit\modules
 -> To fix this, remove the directory and try again:
 ->   rm -rf "C:\Users\User\.gradleInit\modules"
-->   gradleInit --download-modules
+->   gradleInit modules --download
 ```
 
 #### Update Modules
 
 ```bash
-./gradleInit.py --update-modules
+./gradleInit.py modules --update
 ```
 
 Performs `git pull` on the modules repository and **clears the Maven cache** (ensures new resolver logic is used immediately).
@@ -628,9 +628,7 @@ Global Options:
   --version         Show version
   --help            Show help
   --verbose         Verbose output
-  --download-modules    Download optional modules
-  --update-modules      Update modules (clears Maven cache)
-  --install-deps        Auto-install dependencies (for CI)
+  --install-deps    Auto-install dependencies (for CI)
 ```
 
 ---

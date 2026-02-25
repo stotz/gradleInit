@@ -1204,7 +1204,7 @@ class ModuleLoader:
         # Guard against non-interactive environments (CI, piped input)
         if not sys.stdin.isatty():
             print_info("Non-interactive mode detected - skipping module prompt")
-            print_info("Run: gradleInit.py --download-modules")
+            print_info("Run: gradleInit modules --download")
             return False
 
         self._show_modules_prompt()
@@ -1215,7 +1215,7 @@ class ModuleLoader:
             return self._download_modules()
 
         print_info("Continuing without advanced features")
-        print_info("You can download later: gradleInit.py --download-modules")
+        print_info("You can download later: gradleInit modules --download")
         return False
 
     def _show_modules_prompt(self):
@@ -1257,7 +1257,7 @@ class ModuleLoader:
                     print()
                     print_info("To fix this, remove the directory and try again:")
                     print_info(f"  rm -rf \"{self.modules_dir}\"")
-                    print_info("  gradleInit --download-modules")
+                    print_info("  gradleInit modules --download")
                     print()
                     print_warning("Continuing without advanced features")
                     return False
@@ -1281,7 +1281,7 @@ class ModuleLoader:
                     print()
                     print_info("To fix this, remove the directory and try again:")
                     print_info(f"  rm -rf \"{self.modules_dir}\"")
-                    print_info("  gradleInit --download-modules")
+                    print_info("  gradleInit modules --download")
                 else:
                     print_error(f"Failed to download modules: {result.stderr.strip()}")
                 print()
@@ -1299,7 +1299,7 @@ class ModuleLoader:
     def force_download_modules(self) -> bool:
         """
         Force download modules without interactive prompt.
-        Used by --download-modules flag for CI/automation.
+        Used by 'modules --download' command for CI/automation.
         """
         # Check if modules already exist
         if self._modules_exist():
@@ -1361,7 +1361,7 @@ class ModuleLoader:
         """Update modules via git pull"""
         if not self._modules_exist():
             print_error("Modules not installed")
-            print_info("Run: gradleInit.py --download-modules")
+            print_info("Run: gradleInit modules --download")
             return False
 
         print_info("Updating modules...")
@@ -1809,7 +1809,7 @@ class MavenCentralStub:
         print("| Maven Central Integration Not Available |")
         print("+------------------------------------------+")
         print("| To enable:                               |")
-        print("|   gradleInit.py --download-modules       |")
+        print("|   gradleInit modules --download       |")
         print("+------------------------------------------+")
         print()
 
@@ -1826,7 +1826,7 @@ class SpringBootBOMStub:
         print("| Spring Boot BOM Support Not Available   |")
         print("+------------------------------------------+")
         print("| To enable:                               |")
-        print("|   gradleInit.py --download-modules       |")
+        print("|   gradleInit modules --download       |")
         print("+------------------------------------------+")
         print()
 
@@ -2845,16 +2845,20 @@ class DynamicCLIBuilder:
 
         # MODULES COMMAND
         modules_parser = subparsers.add_parser('modules',
-                                                help='Manage module repositories')
+                                                help='Manage modules')
         modules_parser.add_argument('--list', action='store_true',
                                      help='List module repositories')
+        modules_parser.add_argument('--info', action='store_true',
+                                     help='Show modules info')
+        modules_parser.add_argument('--download', action='store_true',
+                                     help='Download modules')
+        modules_parser.add_argument('--update', action='store_true',
+                                     help='Update modules')
         modules_parser.add_argument('--add-repo', nargs=2,
                                      metavar=('NAME', 'URL'),
                                      help='Add module repository')
         modules_parser.add_argument('--remove-repo', metavar='NAME',
                                      help='Remove module repository')
-        modules_parser.add_argument('--update', action='store_true',
-                                     help='Update all module repositories')
         modules_parser.add_argument('--key', metavar='KEYNAME',
                                      help='Key for signature verification')
         modules_parser.add_argument('--unverified', action='store_true',
@@ -5308,9 +5312,44 @@ def handle_verify_command(args: argparse.Namespace) -> int:
 
 
 def handle_modules_command(args: argparse.Namespace, paths: 'GradleInitPaths') -> int:
-    """Handle modules command - Manage module repositories."""
+    """Handle modules command - Manage modules."""
     
-    # Load config
+    module_loader = ModuleLoader(paths)
+    
+    # Handle --download
+    if hasattr(args, 'download') and args.download:
+        success = module_loader.force_download_modules()
+        return 0 if success else 1
+    
+    # Handle --update
+    if hasattr(args, 'update') and args.update:
+        success = module_loader.update_modules()
+        return 0 if success else 1
+    
+    # Handle --info
+    if hasattr(args, 'info') and args.info:
+        info = module_loader.get_modules_info()
+
+        print_header("Modules Information")
+        print(f"Installed: {info.get('installed', False)}")
+
+        if info.get('installed'):
+            print(f"Path: {info.get('path')}")
+            print(f"Version: {info.get('version', 'unknown')}")
+            print(f"Commit: {info.get('commit', 'unknown')}")
+            print()
+            print("Available features:")
+            print(f"  Maven Central: {info.get('maven_central', False)}")
+            print(f"  Spring Boot BOM: {info.get('spring_boot', False)}")
+            print(f"  Update Manager: {info.get('updater', False)}")
+        else:
+            print()
+            print("Modules not installed")
+            print("Run: gradleInit modules --download")
+
+        return 0
+    
+    # Load config for repository management
     config = load_config(paths.config_file)
     
     if 'module_repositories' not in config:
@@ -5321,7 +5360,7 @@ def handle_modules_command(args: argparse.Namespace, paths: 'GradleInitPaths') -
             }
         }
     
-    if args.list:
+    if hasattr(args, 'list') and args.list:
         print("Module repositories:")
         print()
         for name, repo_info in config.get('module_repositories', {}).items():
@@ -5334,7 +5373,7 @@ def handle_modules_command(args: argparse.Namespace, paths: 'GradleInitPaths') -
             print()
         return 0
     
-    if args.add_repo:
+    if hasattr(args, 'add_repo') and args.add_repo:
         name, url = args.add_repo
         
         if name in config.get('module_repositories', {}):
@@ -5368,7 +5407,7 @@ def handle_modules_command(args: argparse.Namespace, paths: 'GradleInitPaths') -
         print_success(f"Added repository '{name}'")
         return 0
     
-    if args.remove_repo:
+    if hasattr(args, 'remove_repo') and args.remove_repo:
         name = args.remove_repo
         
         if name == 'official':
@@ -5384,15 +5423,9 @@ def handle_modules_command(args: argparse.Namespace, paths: 'GradleInitPaths') -
         print_success(f"Removed repository '{name}'")
         return 0
     
-    if args.update:
-        print("Updating module repositories...")
-        # TODO: Implement update with signature verification
-        print_info("Not yet implemented")
-        return 0
-    
-    # Default: list
+    # Default: show info
     return handle_modules_command(
-        argparse.Namespace(list=True, add_repo=None, remove_repo=None, update=False, key=None, unverified=False),
+        argparse.Namespace(info=True, download=False, update=False, list=False, add_repo=None, remove_repo=None, key=None, unverified=False),
         paths
     )
 
@@ -5465,11 +5498,8 @@ def main():
     # Initialize repository manager
     repo_manager = TemplateRepositoryManager(paths)
 
-    # Phase 1: Parse to get basic args and check for module commands
+    # Phase 1: Parse to get basic args and check for special commands
     parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
-    parser.add_argument('--download-modules', action='store_true')
-    parser.add_argument('--update-modules', action='store_true')
-    parser.add_argument('--modules-info', action='store_true')
     parser.add_argument('--scoop-shims-install', action='store_true')
     parser.add_argument('--scoop-shims-uninstall', action='store_true')
     parser.add_argument('--no-interactive', action='store_true')
@@ -5487,38 +5517,6 @@ def main():
         success = uninstall_scoop_shims()
         return 0 if success else 1
 
-    # Handle module commands first
-    if phase1_args.download_modules:
-        # Direct download without interactive prompt
-        success = module_loader.force_download_modules()
-        return 0 if success else 1
-
-    if phase1_args.update_modules:
-        success = module_loader.update_modules()
-        return 0 if success else 1
-
-    if phase1_args.modules_info:
-        info = module_loader.get_modules_info()
-
-        print_header("Modules Information")
-        print(f"Installed: {info.get('installed', False)}")
-
-        if info.get('installed'):
-            print(f"Path: {info.get('path')}")
-            print(f"Version: {info.get('version', 'unknown')}")
-            print(f"Commit: {info.get('commit', 'unknown')}")
-            print()
-            print("Available features:")
-            print(f"  Maven Central: {info.get('maven_central', False)}")
-            print(f"  Spring Boot BOM: {info.get('spring_boot', False)}")
-            print(f"  Update Manager: {info.get('updater', False)}")
-        else:
-            print()
-            print("Modules not installed")
-            print("Run: gradleInit.py --download-modules")
-
-        return 0
-
     # Load modules (auto-download on demand for init command, but not in non-interactive mode)
     if phase1_args.command == 'init':
         auto_download = not phase1_args.no_interactive
@@ -5526,14 +5524,6 @@ def main():
 
     # Phase 2: Create full parser
     full_parser = DynamicCLIBuilder.create_base_parser()
-
-    # Add module management arguments to main parser
-    full_parser.add_argument('--download-modules', action='store_true',
-                             help='Download optional modules')
-    full_parser.add_argument('--update-modules', action='store_true',
-                             help='Update modules')
-    full_parser.add_argument('--modules-info', action='store_true',
-                             help='Show modules info')
 
     # If init command with template, add template-specific arguments
     if phase1_args.command == 'init' and phase1_args.template:
