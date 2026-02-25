@@ -1729,6 +1729,16 @@ class VersionManager:
                 group_id, artifact_id = self.extract_artifact_coords(entry.url)
                 if group_id and artifact_id:
                     try:
+                        # First check if artifact exists at all
+                        all_versions = maven_central.get_versions(group_id, artifact_id, limit=1, include_prerelease=True)
+                        
+                        if not all_versions:
+                            # Artifact not found on Maven Central
+                            result['status'] = 'NOT_FOUND'
+                            result['message'] = f'not on Maven Central - check manually: {entry.url}'
+                            results.append(result)
+                            continue
+                        
                         # For @* (latest), get latest stable version
                         if ctype == 'latest':
                             latest = maven_central.get_latest_version(group_id, artifact_id)
@@ -5085,6 +5095,8 @@ def handle_versions_command(args: argparse.Namespace) -> int:
             current.append(r)
         elif r['status'] == 'VIOLATE':
             violations.append(r)
+        elif r['status'] == 'NOT_FOUND':
+            skipped.append(r)  # Count as skipped
         elif r['status'] == 'UNKNOWN':
             unknown.append(r)
         else:
@@ -5105,6 +5117,8 @@ def handle_versions_command(args: argparse.Namespace) -> int:
         elif r['status'] == 'PINNED':
             print(f"  [PINNED]  {name}: {curr} ({r['message']})")
         elif r['status'] == 'SKIP':
+            print(f"  [SKIP]    {name}: {curr} ({r['message']})")
+        elif r['status'] == 'NOT_FOUND':
             print(f"  [SKIP]    {name}: {curr} ({r['message']})")
         elif r['status'] == 'VIOLATE':
             print(f"  [VIOLATE] {name}: {r['message']}")
