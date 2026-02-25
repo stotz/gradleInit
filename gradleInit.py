@@ -1374,12 +1374,27 @@ class ModuleLoader:
                 check=True
             )
 
+            # Clear Maven cache after module update
+            # (resolver logic may have changed)
+            self._clear_maven_cache()
+
             print_success("Modules updated")
             return True
 
         except subprocess.CalledProcessError as e:
             print_error(f"Failed to update modules: {e.stderr}")
             return False
+
+    def _clear_maven_cache(self):
+        """Clear Maven version cache"""
+        cache_dir = self.paths.cache_dir / 'maven'
+        if cache_dir.exists():
+            try:
+                import shutil
+                shutil.rmtree(cache_dir)
+                print_info("Maven cache cleared")
+            except OSError as e:
+                print_warning(f"Could not clear Maven cache: {e}")
 
     def get_modules_info(self) -> Dict[str, Any]:
         """Get information about installed modules"""
