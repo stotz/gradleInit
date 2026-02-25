@@ -1709,18 +1709,31 @@ class VersionManager:
                 results.append(result)
                 continue
             
-            # Try to get latest version
+            # Try to get best matching version
             if maven_central:
                 group_id, artifact_id = self.extract_artifact_coords(entry.url)
                 if group_id and artifact_id:
                     try:
-                        latest = maven_central.get_latest_version(group_id, artifact_id)
+                        # For @* (latest), get latest stable version
+                        if ctype == 'latest':
+                            latest = maven_central.get_latest_version(group_id, artifact_id)
+                        else:
+                            # For constraints, find best matching version
+                            latest = maven_central.get_matching_version(
+                                group_id, artifact_id,
+                                ctype, cvalue,
+                                entry.current_version
+                            )
+                        
                         result['latest'] = latest
                         
-                        if latest == entry.current_version:
+                        if latest is None:
+                            result['status'] = 'VIOLATE'
+                            result['message'] = f'no version satisfies @{entry.constraint}'
+                        elif latest == entry.current_version:
                             result['status'] = 'CURRENT'
                             result['message'] = 'up to date'
-                        elif VersionConstraintChecker.satisfies(latest, entry.constraint):
+                        elif ctype == 'latest' or VersionConstraintChecker.satisfies(latest, entry.constraint):
                             result['status'] = 'UPDATE'
                             result['message'] = f'@{entry.constraint}'
                         else:
