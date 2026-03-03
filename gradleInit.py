@@ -1671,7 +1671,7 @@ class VersionManager:
             return (match.group(1), match.group(2))
         return ('', '')
     
-    def check_updates(self, maven_central=None) -> List[Dict[str, Any]]:
+    def check_updates(self, maven_central=None, include_recent: bool = False) -> List[Dict[str, Any]]:
         """
         Check for available updates.
         
@@ -1687,7 +1687,8 @@ class VersionManager:
                 'latest': None,
                 'status': 'SKIP',
                 'constraint': entry.constraint,
-                'message': ''
+                'message': '',
+                'age_hours': None
             }
             
             # No URL = skip
@@ -1739,9 +1740,14 @@ class VersionManager:
                             results.append(result)
                             continue
                         
-                        # For @* (latest), get latest stable version
+                        # For @* (latest), get latest stable version with age info
                         if ctype == 'latest':
-                            latest = maven_central.get_latest_version(group_id, artifact_id)
+                            version_info = maven_central.get_version_info(group_id, artifact_id)
+                            if version_info:
+                                latest = version_info.get('version')
+                                result['age_hours'] = version_info.get('age_hours')
+                            else:
+                                latest = maven_central.get_latest_version(group_id, artifact_id)
                         else:
                             # For constraints, find best matching version
                             latest = maven_central.get_matching_version(
@@ -1759,8 +1765,14 @@ class VersionManager:
                             result['status'] = 'CURRENT'
                             result['message'] = 'up to date'
                         elif ctype == 'latest' or VersionConstraintChecker.satisfies(latest, entry.constraint):
-                            result['status'] = 'UPDATE'
-                            result['message'] = f'@{entry.constraint}'
+                            # Check age if not include_recent
+                            age_hours = result.get('age_hours')
+                            if not include_recent and age_hours is not None and age_hours < 24:
+                                result['status'] = 'TOO_RECENT'
+                                result['message'] = f'released {age_hours:.0f}h ago - use --include-recent'
+                            else:
+                                result['status'] = 'UPDATE'
+                                result['message'] = f'@{entry.constraint}'
                         else:
                             result['status'] = 'VIOLATE'
                             result['message'] = f'{latest} violates @{entry.constraint}'
@@ -2819,6 +2831,8 @@ class DynamicCLIBuilder:
                                       help='Update dependencies')
         versions_parser.add_argument('--yes', '-y', action='store_true',
                                       help='Apply updates without confirmation')
+        versions_parser.add_argument('--include-recent', action='store_true',
+                                      help='Include versions released less than 24 hours ago')
         versions_parser.add_argument('dependency', nargs='?',
                                       help='Specific dependency to update (optional)')
 
@@ -5073,7 +5087,8 @@ def handle_versions_command(args: argparse.Namespace) -> int:
         pass
     
     # Check for updates
-    results = manager.check_updates(maven_central)
+    include_recent = getattr(args, 'include_recent', False)
+    results = manager.check_updates(maven_central, include_recent=include_recent)
     
     # Categorize results
     updates = []
@@ -5081,6 +5096,7 @@ def handle_versions_command(args: argparse.Namespace) -> int:
     skipped = []
     current = []
     violations = []
+    too_recent = []
     unknown = []
     errors = []
     
@@ -5097,6 +5113,8 @@ def handle_versions_command(args: argparse.Namespace) -> int:
             violations.append(r)
         elif r['status'] == 'NOT_FOUND':
             skipped.append(r)  # Count as skipped
+        elif r['status'] == 'TOO_RECENT':
+            too_recent.append(r)
         elif r['status'] == 'UNKNOWN':
             unknown.append(r)
         else:
@@ -5120,6 +5138,9 @@ def handle_versions_command(args: argparse.Namespace) -> int:
             print(f"  [SKIP]    {name}: {curr} ({r['message']})")
         elif r['status'] == 'NOT_FOUND':
             print(f"  [SKIP]    {name}: {curr} ({r['message']})")
+        elif r['status'] == 'TOO_RECENT':
+            latest = r['latest']
+            print(f"  [RECENT]  {name}: {curr} -> {latest} ({r['message']})")
         elif r['status'] == 'VIOLATE':
             print(f"  [VIOLATE] {name}: {r['message']}")
         elif r['status'] == 'UNKNOWN':
@@ -5135,6 +5156,8 @@ def handle_versions_command(args: argparse.Namespace) -> int:
     summary_parts = []
     if updates:
         summary_parts.append(f"{len(updates)} updates available")
+    if too_recent:
+        summary_parts.append(f"{len(too_recent)} too recent")
     if pinned:
         summary_parts.append(f"{len(pinned)} pinned")
     if skipped:
