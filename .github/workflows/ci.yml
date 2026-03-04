@@ -131,7 +131,7 @@ jobs:
         run: python gradleInit.py templates --update
       
       - name: Download modules
-        run: python gradleInit.py --download-modules
+        run: python gradleInit.py modules --download
       
       - name: Generate project from template
         run: |
@@ -196,7 +196,7 @@ jobs:
         run: python gradleInit.py templates --update
       
       - name: Download modules
-        run: python gradleInit.py --download-modules
+        run: python gradleInit.py modules --download
       
       - name: Generate JavaFX project
         run: |
@@ -245,7 +245,7 @@ jobs:
         run: python gradleInit.py templates --update
       
       - name: Download modules
-        run: python gradleInit.py --download-modules
+        run: python gradleInit.py modules --download
       
       - name: Generate kotlin-multi project
         run: |
@@ -298,7 +298,7 @@ jobs:
         run: python gradleInit.py templates --update
       
       - name: Download modules
-        run: python gradleInit.py --download-modules
+        run: python gradleInit.py modules --download
       
       - name: Create multiproject-root
         run: |
