@@ -1141,6 +1141,9 @@ class GradleInitPaths:
                 'kotlin_version': '2.3.10',
                 'jdk_version': '21'
             },
+            'versions': {
+                'maven_recent_hours': 48
+            },
             'custom': {
                 'author': '',
                 'email': '',
@@ -1671,7 +1674,7 @@ class VersionManager:
             return (match.group(1), match.group(2))
         return ('', '')
     
-    def check_updates(self, maven_central=None, include_recent: bool = False) -> List[Dict[str, Any]]:
+    def check_updates(self, maven_central=None, include_recent: bool = False, recent_hours: int = 48) -> List[Dict[str, Any]]:
         """
         Check for available updates.
         
@@ -1767,7 +1770,7 @@ class VersionManager:
                         elif ctype == 'latest' or VersionConstraintChecker.satisfies(latest, entry.constraint):
                             # Check age if not include_recent
                             age_hours = result.get('age_hours')
-                            if not include_recent and age_hours is not None and age_hours < 24:
+                            if not include_recent and age_hours is not None and age_hours < recent_hours:
                                 result['status'] = 'TOO_RECENT'
                                 result['message'] = f'released {age_hours:.0f}h ago - use --include-recent'
                             else:
@@ -2727,6 +2730,17 @@ class DynamicCLIBuilder:
     @staticmethod
     def create_base_parser() -> argparse.ArgumentParser:
         """Create parser with base arguments"""
+        
+        # Load maven_recent_hours from config for help text
+        recent_hours = 48  # Default
+        try:
+            config_file = Path.home() / '.gradleInit' / 'config'
+            if config_file.exists():
+                config = load_config(config_file)
+                recent_hours = config.get('versions', {}).get('maven_recent_hours', 48)
+        except Exception:
+            pass
+        
         parser = argparse.ArgumentParser(
             description=f'Gradle Project Initializer v{SCRIPT_VERSION}',
             formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -2832,7 +2846,7 @@ class DynamicCLIBuilder:
         versions_parser.add_argument('--yes', '-y', action='store_true',
                                       help='Apply updates without confirmation')
         versions_parser.add_argument('--include-recent', action='store_true',
-                                      help='Include versions released less than 24 hours ago')
+                                      help=f'Include versions released less than {recent_hours} hours ago')
         versions_parser.add_argument('dependency', nargs='?',
                                       help='Specific dependency to update (optional)')
 
@@ -5086,9 +5100,11 @@ def handle_versions_command(args: argparse.Namespace) -> int:
     except Exception:
         pass
     
-    # Check for updates
+    # Get recent_hours from config (default 48)
+    config = load_config(paths.config_file)
+    recent_hours = config.get('versions', {}).get('maven_recent_hours', 48)
     include_recent = getattr(args, 'include_recent', False)
-    results = manager.check_updates(maven_central, include_recent=include_recent)
+    results = manager.check_updates(maven_central, include_recent=include_recent, recent_hours=recent_hours)
     
     # Categorize results
     updates = []
@@ -5528,6 +5544,15 @@ def main():
     # Initialize paths
     paths = GradleInitPaths()
     paths.ensure_structure()
+
+    # Load config and ensure maven.recent_hours exists
+    config = load_config(paths.config_file)
+    if 'maven' not in config:
+        config['maven'] = {}
+    if 'recent_hours' not in config.get('maven', {}):
+        config['maven']['recent_hours'] = 48
+        save_config(paths.config_file, config)
+    recent_hours = config.get('maven', {}).get('recent_hours', 48)
 
     # Initialize module loader
     module_loader = ModuleLoader(paths)
