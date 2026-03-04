@@ -44,25 +44,25 @@ A comprehensive single-file Python tool for creating professional Kotlin/Gradle 
 
 | Template | Description | Key Dependencies |
 |----------|-------------|------------------|
-| `kotlin-single` | Single-module CLI application | Clikt 5.1.0, Shadow 9.3.1 |
-| `kotlin-multi` | Multi-module with buildSrc | Shadow 9.3.1 |
-| `ktor` | Ktor HTTP server | Ktor 3.4.0, Logback 1.5.29 |
-| `springboot` | Spring Boot REST API | Spring Boot 4.0.2 |
+| `kotlin-single` | Single-module CLI application | Clikt 5.1.0, Shadow 9.3.2 |
+| `kotlin-multi` | Multi-module with buildSrc | Shadow 9.3.2 |
+| `ktor` | Ktor HTTP server | Ktor 3.4.1, Logback 1.5.32 |
+| `springboot` | Spring Boot REST API | Spring Boot 4.0.3 |
 | `kotlin-javaFX` | JavaFX desktop application | JavaFX 25.0.1, Ikonli 12.4.0 |
 | `multiproject-root` | Root for multi-module projects | All above available |
 
 ### Current Versions (from Templates)
 
 ```
-Kotlin:      2.1.0+ (via kotlin_version variable)
-JUnit:       5.13.4
-AssertJ:     3.27.3
+Kotlin:      2.3.10 (via kotlin_version variable)
+JUnit:       6.0.3
+AssertJ:     3.27.7
 MockK:       1.14.9
-Shadow:      9.3.1
-Ktor:        3.4.0
-Spring Boot: 4.0.2
-JavaFX:      25.0.1
-Logback:     1.5.29
+Shadow:      9.3.2
+Ktor:        3.4.1
+Spring Boot: 4.0.3
+JavaFX:      25.0.2
+Logback:     1.5.32
 Clikt:       5.1.0
 ```
 
