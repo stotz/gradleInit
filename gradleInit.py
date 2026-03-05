@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple, Any
 # Version & Constants
 # ============================================================================
 
-SCRIPT_VERSION = "1.9.0"
+SCRIPT_VERSION = "1.0.0"
 MODULES_REPO = "https://github.com/stotz/gradleInitModules.git"
 TEMPLATES_REPO = "https://github.com/stotz/gradleInitTemplates.git"
 MODULES_VERSION = "main"  # Use main branch

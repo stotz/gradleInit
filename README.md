@@ -4,7 +4,7 @@
 
 A comprehensive single-file Python tool for creating professional Kotlin/Gradle projects. Features intelligent template management, dependency version updates with npm-style constraints, repository signing, and cross-platform compatibility.
 
-[![Version](https://img.shields.io/badge/version-1.9.0-blue.svg)](https://github.com/stotz/gradleInit)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/stotz/gradleInit)
 [![Python](https://img.shields.io/badge/python-3.8+-green.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
 
