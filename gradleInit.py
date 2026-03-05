@@ -8,7 +8,7 @@ Architecture: Core + Optional Modules
 - Git required for templates (already a requirement)
 - Modules auto-download on demand
 
-Version: 1.3.0
+Version: 1.0.0
 Author: Urs Stotz
 License: MIT
 """
@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple, Any
 # Version & Constants
 # ============================================================================
 
-SCRIPT_VERSION = "1.0.0"
+SCRIPT_VERSION = "1.9.0"
 MODULES_REPO = "https://github.com/stotz/gradleInitModules.git"
 TEMPLATES_REPO = "https://github.com/stotz/gradleInitTemplates.git"
 MODULES_VERSION = "main"  # Use main branch
@@ -80,10 +80,10 @@ AUTO_INSTALL_DEPS = '--install-deps' in sys.argv
 def install_package(package_name: str) -> bool:
     """
     Install a Python package using pip.
-
+    
     Args:
         package_name: Name of the package to install
-
+    
     Returns:
         True if installation succeeded
     """
@@ -117,11 +117,11 @@ def install_package(package_name: str) -> bool:
 def prompt_install_package(package_name: str, feature_name: str) -> bool:
     """
     Prompt user to install a missing package.
-
+    
     Args:
         package_name: Name of the package to install
         feature_name: Human-readable feature name that requires this package
-
+    
     Returns:
         True if package is now available
     """
@@ -131,11 +131,11 @@ def prompt_install_package(package_name: str, feature_name: str) -> bool:
         return True
     except ImportError:
         pass
-
+    
     # Auto-install mode (CI)
     if AUTO_INSTALL_DEPS:
         return install_package(package_name)
-
+    
     # Interactive prompt
     print()
     print(f"Package '{package_name}' is required for {feature_name}.")
@@ -143,7 +143,7 @@ def prompt_install_package(package_name: str, feature_name: str) -> bool:
         response = input("Install now? [Y/n]: ").strip().lower()
     except EOFError:
         response = 'n'
-
+    
     if response in ['', 'y', 'yes']:
         if install_package(package_name):
             print()
@@ -159,7 +159,7 @@ def prompt_install_package(package_name: str, feature_name: str) -> bool:
 def check_and_install_dependencies() -> bool:
     """
     Check for required dependencies and offer to install missing ones.
-
+    
     Returns:
         True if all required dependencies are available
     """
@@ -168,29 +168,29 @@ def check_and_install_dependencies() -> bool:
         'toml': 'toml',
         'jinja2': 'jinja2',
     }
-
+    
     # Optional packages
     optional = {
         'yaml': 'pyyaml',
     }
-
+    
     missing_required = []
     missing_optional = []
-
+    
     # Check required
     for module_name, package_name in required.items():
         try:
             __import__(module_name)
         except ImportError:
             missing_required.append((module_name, package_name))
-
+    
     # Check optional
     for module_name, package_name in optional.items():
         try:
             __import__(module_name)
         except ImportError:
             missing_optional.append((module_name, package_name))
-
+    
     # Handle missing required packages
     if missing_required:
         print()
@@ -198,18 +198,18 @@ def check_and_install_dependencies() -> bool:
         print("  Missing Required Dependencies")
         print("=" * 60)
         print()
-
+        
         for module_name, package_name in missing_required:
             print(f"  - {package_name}")
         print()
-
+        
         if AUTO_INSTALL_DEPS:
             print("[INFO] Auto-installing required packages...")
             all_installed = True
             for module_name, package_name in missing_required:
                 if not install_package(package_name):
                     all_installed = False
-
+            
             if all_installed:
                 print()
                 print("[INFO] All packages installed. Please restart gradleInit.")
@@ -223,13 +223,13 @@ def check_and_install_dependencies() -> bool:
                 response = input("Install required packages now? [Y/n]: ").strip().lower()
             except EOFError:
                 response = 'n'
-
+            
             if response in ['', 'y', 'yes']:
                 all_installed = True
                 for module_name, package_name in missing_required:
                     if not install_package(package_name):
                         all_installed = False
-
+                
                 if all_installed:
                     print()
                     print("[INFO] All packages installed. Please restart gradleInit.")
@@ -248,12 +248,12 @@ def check_and_install_dependencies() -> bool:
                     print(f"  pip install {package_name} --break-system-packages")
                 print()
                 sys.exit(1)
-
+    
     # Report optional missing (no install prompt)
     if missing_optional:
         # Only show note, don't spam on every run
         pass
-
+    
     return True
 
 
@@ -292,15 +292,15 @@ def ensure_cryptography() -> bool:
     """
     Ensure cryptography package is available.
     Prompts for installation if missing.
-
+    
     Returns:
         True if cryptography is available
     """
     global CRYPTOGRAPHY_AVAILABLE
-
+    
     if CRYPTOGRAPHY_AVAILABLE:
         return True
-
+    
     if prompt_install_package('cryptography', 'security features (signing, verification)'):
         # Try to import again
         try:
@@ -312,46 +312,46 @@ def ensure_cryptography() -> bool:
             return True
         except ImportError:
             pass
-
+    
     return False
 
 
 class RepositorySecurity:
     """
     Handle repository signing and verification.
-
+    
     Uses RSA-4096 with SHA-256 for signatures.
     Requires 'cryptography' package for security features.
     """
-
+    
     KEY_SIZE = 4096
     CHECKSUMS_FILE = "CHECKSUMS.sha256"
     SIGNATURE_FILE = "CHECKSUMS.sig"
-
+    
     def __init__(self, keys_dir: Optional[Path] = None):
         """
         Initialize security manager.
-
+        
         Args:
             keys_dir: Directory for storing keys. Defaults to ~/.gradleInit/keys/
         """
         if keys_dir is None:
             keys_dir = Path.home() / '.gradleInit' / 'keys'
         self.keys_dir = keys_dir
-
+    
     @staticmethod
     def is_available() -> bool:
         """Check if cryptography package is available"""
         return CRYPTOGRAPHY_AVAILABLE
-
+    
     @staticmethod
     def require_available() -> bool:
         """
         Ensure cryptography is available, prompt for installation if not.
-
+        
         Returns:
             True if available
-
+        
         Raises:
             RuntimeError if not available and user declined installation
         """
@@ -360,81 +360,81 @@ class RepositorySecurity:
                 "Security features require 'cryptography' package."
             )
         return True
-
+    
     def generate_keypair(self, name: str) -> Tuple[Path, Path]:
         """
         Generate a new RSA keypair.
-
+        
         Args:
             name: Name for the keypair (e.g., "company")
-
+        
         Returns:
             Tuple of (private_key_path, public_key_path)
         """
         self.require_available()
-
+        
         self.keys_dir.mkdir(parents=True, exist_ok=True)
-
+        
         private_key_path = self.keys_dir / f"{name}.private.pem"
         public_key_path = self.keys_dir / f"{name}.public.pem"
-
+        
         # Check if already exists
         if private_key_path.exists() or public_key_path.exists():
             raise FileExistsError(
                 f"Key '{name}' already exists at\n{private_key_path}\n{public_key_path}"
             )
-
+        
         # Generate private key
         private_key = rsa.generate_private_key(
             public_exponent=65537,
             key_size=self.KEY_SIZE,
             backend=default_backend()
         )
-
+        
         # Serialize private key
         private_pem = private_key.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.PKCS8,
             encryption_algorithm=serialization.NoEncryption()
         )
-
+        
         # Serialize public key
         public_key = private_key.public_key()
         public_pem = public_key.public_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         )
-
+        
         # Write keys
         private_key_path.write_bytes(private_pem)
         public_key_path.write_bytes(public_pem)
-
+        
         # Set restrictive permissions on private key (Unix only)
         if not IS_WINDOWS:
             os.chmod(private_key_path, 0o600)
-
+        
         return private_key_path, public_key_path
-
+    
     def import_public_key(self, name: str, key_source: str) -> Path:
         """
         Import a public key from file or URL.
-
+        
         Args:
             name: Name for the key
             key_source: Path or URL to public key PEM file
-
+        
         Returns:
             Path to imported key
         """
         self.require_available()
-
+        
         self.keys_dir.mkdir(parents=True, exist_ok=True)
-
+        
         public_key_path = self.keys_dir / f"{name}.public.pem"
-
+        
         if public_key_path.exists():
             raise FileExistsError(f"Key '{name}' already exists")
-
+        
         # Load key content
         if key_source.startswith('http://') or key_source.startswith('https://'):
             import urllib.request
@@ -442,46 +442,46 @@ class RepositorySecurity:
                 key_pem = response.read()
         else:
             key_pem = Path(key_source).read_bytes()
-
+        
         # Validate it's a valid public key
         try:
             serialization.load_pem_public_key(key_pem, backend=default_backend())
         except Exception as e:
             raise ValueError(f"Invalid public key: {e}")
-
+        
         # Save key
         public_key_path.write_bytes(key_pem)
-
+        
         return public_key_path
-
+    
     def get_public_key(self, name: str) -> Optional[bytes]:
         """
         Get public key bytes by name.
-
+        
         Args:
             name: Key name, or "official" for embedded key
-
+        
         Returns:
             PEM-encoded public key bytes, or None if not found
         """
         if name == "official":
             return OFFICIAL_PUBLIC_KEY.encode('utf-8')
-
+        
         key_path = self.keys_dir / f"{name}.public.pem"
         if key_path.exists():
             return key_path.read_bytes()
-
+        
         return None
-
+    
     def list_keys(self) -> List[Dict[str, Any]]:
         """
         List all available keys.
-
+        
         Returns:
             List of dicts with key info
         """
         keys = []
-
+        
         # Official key
         keys.append({
             'name': 'official',
@@ -489,7 +489,7 @@ class RepositorySecurity:
             'path': None,
             'has_private': False
         })
-
+        
         # User keys
         if self.keys_dir.exists():
             for key_file in self.keys_dir.glob('*.public.pem'):
@@ -501,83 +501,83 @@ class RepositorySecurity:
                     'path': str(key_file),
                     'has_private': private_exists
                 })
-
+        
         return keys
-
+    
     def sign_repository(self, repo_path: Path, key_name: str) -> Tuple[Path, Path]:
         """
         Sign a repository by creating checksums and signature.
-
+        
         Args:
             repo_path: Path to repository root
             key_name: Name of private key to use
-
+        
         Returns:
             Tuple of (checksums_path, signature_path)
         """
         self.require_available()
-
+        
         # Load private key
         private_key_path = self.keys_dir / f"{key_name}.private.pem"
         if not private_key_path.exists():
             raise FileNotFoundError(f"Private key '{key_name}' not found")
-
+        
         private_key = serialization.load_pem_private_key(
             private_key_path.read_bytes(),
             password=None,
             backend=default_backend()
         )
-
+        
         # Generate checksums for all relevant files
         checksums_content = self._generate_checksums(repo_path)
-
+        
         # Convert to bytes with explicit LF (cross-platform consistency)
         checksums_bytes = checksums_content.encode('utf-8')
-
+        
         # Write checksums file (binary mode to preserve LF)
         checksums_path = repo_path / self.CHECKSUMS_FILE
         checksums_path.write_bytes(checksums_bytes)
-
+        
         # Sign checksums
         signature = private_key.sign(
             checksums_bytes,
             padding.PKCS1v15(),
             hashes.SHA256()
         )
-
+        
         # Write signature
         signature_path = repo_path / self.SIGNATURE_FILE
         signature_path.write_bytes(signature)
-
+        
         return checksums_path, signature_path
-
+    
     def verify_repository(self, repo_path: Path, key_name: str) -> Tuple[bool, str]:
         """
         Verify repository signature.
-
+        
         Args:
             repo_path: Path to repository root
             key_name: Name of public key to use
-
+        
         Returns:
             Tuple of (success, message)
         """
         self.require_available()
-
+        
         checksums_path = repo_path / self.CHECKSUMS_FILE
         signature_path = repo_path / self.SIGNATURE_FILE
-
+        
         # Check files exist
         if not checksums_path.exists():
             return False, f"Checksums file not found: {self.CHECKSUMS_FILE}"
         if not signature_path.exists():
             return False, f"Signature file not found: {self.SIGNATURE_FILE}"
-
+        
         # Load public key
         public_key_pem = self.get_public_key(key_name)
         if public_key_pem is None:
             return False, f"Public key '{key_name}' not found"
-
+        
         try:
             public_key = serialization.load_pem_public_key(
                 public_key_pem,
@@ -585,11 +585,11 @@ class RepositorySecurity:
             )
         except Exception as e:
             return False, f"Invalid public key: {e}"
-
+        
         # Read checksums and signature
         checksums_content = checksums_path.read_bytes()
         signature = signature_path.read_bytes()
-
+        
         # Verify signature
         try:
             public_key.verify(
@@ -602,26 +602,26 @@ class RepositorySecurity:
             return False, "Signature verification FAILED - repository may be tampered"
         except Exception as e:
             return False, f"Verification error: {e}"
-
+        
         # Verify individual file checksums
         valid, message = self._verify_checksums(repo_path, checksums_content.decode('utf-8'))
         if not valid:
             return False, message
-
+        
         return True, "Signature verified"
-
+    
     def _get_file_hash(self, repo_path: Path, rel_path: str) -> Optional[str]:
         """Get SHA256 hash of file content."""
         file_path = repo_path / rel_path
         if not file_path.exists():
             return None
-
+        
         return hashlib.sha256(file_path.read_bytes()).hexdigest()
-
+    
     def _generate_checksums(self, repo_path: Path) -> str:
         """Generate SHA256 checksums for repository files tracked by git"""
         lines = []
-
+        
         # Get list of tracked files from git
         try:
             result = subprocess.run(
@@ -635,10 +635,10 @@ class RepositorySecurity:
         except (subprocess.CalledProcessError, FileNotFoundError):
             # Fallback: use all files if git not available
             tracked_files = None
-
+        
         # Files to exclude from checksums
         exclude_files = {self.CHECKSUMS_FILE, self.SIGNATURE_FILE}
-
+        
         if tracked_files:
             # Use git tracked files
             for rel_path_str in sorted(tracked_files):
@@ -646,7 +646,7 @@ class RepositorySecurity:
                     continue
                 if rel_path_str in exclude_files:
                     continue
-
+                
                 file_path = repo_path / rel_path_str
                 if file_path.exists() and file_path.is_file():
                     sha256 = self._get_file_hash(repo_path, rel_path_str)
@@ -656,11 +656,11 @@ class RepositorySecurity:
         else:
             # Fallback: scan directory
             exclude_patterns = {'.git', '__pycache__'}
-
+            
             for file_path in sorted(repo_path.rglob('*')):
                 if file_path.is_dir():
                     continue
-
+                
                 rel_path = file_path.relative_to(repo_path)
                 if any(part in exclude_patterns for part in rel_path.parts):
                     continue
@@ -668,33 +668,33 @@ class RepositorySecurity:
                     continue
                 if rel_path.name in exclude_files:
                     continue
-
+                
                 sha256 = self._get_file_hash(repo_path, rel_path.as_posix())
                 if sha256:
                     lines.append(f"{sha256}  {rel_path.as_posix()}")
-
+        
         return '\n'.join(lines) + '\n'
-
+    
     def _verify_checksums(self, repo_path: Path, checksums_content: str) -> Tuple[bool, str]:
         """Verify individual file checksums"""
         for line in checksums_content.strip().split('\n'):
             if not line.strip():
                 continue
-
+            
             parts = line.split('  ', 1)
             if len(parts) != 2:
                 continue
-
+            
             expected_hash, rel_path = parts
             file_path = repo_path / rel_path
-
+            
             if not file_path.exists():
                 return False, f"Missing file: {rel_path}"
-
+            
             actual_hash = self._get_file_hash(repo_path, rel_path)
             if actual_hash != expected_hash:
                 return False, f"Checksum mismatch: {rel_path}"
-
+        
         return True, "All checksums valid"
 
 
@@ -1454,20 +1454,20 @@ class VersionEntry:
 
 class VersionConstraintChecker:
     """Check versions against npm-style constraints"""
-
+    
     @staticmethod
     def parse_constraint(constraint: str) -> Tuple[str, Optional[str]]:
         """
         Parse constraint string into type and value.
-
+        
         Returns: (type, value) where type is one of:
             'pin', 'latest', 'caret', 'tilde', 'gte', 'lte', 'gt', 'lt', 'range', 'wildcard', 'exact'
         """
         if not constraint:
             return ('latest', None)
-
+        
         constraint = constraint.strip()
-
+        
         if constraint == 'pin':
             return ('pin', None)
         if constraint == '*':
@@ -1489,15 +1489,15 @@ class VersionConstraintChecker:
             return ('lt', constraint[1:].strip())
         if constraint.endswith('.x') or constraint.endswith('.*'):
             return ('wildcard', constraint[:-2])
-
+        
         # Check if it looks like a version number (exact pin)
         import re
         if re.match(r'^\d+(\.\d+)*(-[\w.]+)?$', constraint):
             return ('exact', constraint)
-
+        
         # Unknown constraint
         return ('unknown', constraint)
-
+    
     @staticmethod
     def parse_version(version: str) -> Tuple[int, int, int, str]:
         """Parse version string into (major, minor, patch, rest)"""
@@ -1510,34 +1510,34 @@ class VersionConstraintChecker:
         patch = int(match.group(3)) if match.group(3) else 0
         rest = match.group(4) or ''
         return (major, minor, patch, rest)
-
+    
     @staticmethod
     def compare_versions(v1: str, v2: str) -> int:
         """Compare two versions. Returns -1 if v1<v2, 0 if equal, 1 if v1>v2"""
         p1 = VersionConstraintChecker.parse_version(v1)
         p2 = VersionConstraintChecker.parse_version(v2)
-
+        
         for i in range(3):
             if p1[i] < p2[i]:
                 return -1
             if p1[i] > p2[i]:
                 return 1
         return 0
-
+    
     @staticmethod
     def satisfies(version: str, constraint: str) -> bool:
         """Check if version satisfies the constraint"""
         ctype, cvalue = VersionConstraintChecker.parse_constraint(constraint)
-
+        
         if ctype == 'pin':
             return False  # Never update
         if ctype == 'latest':
             return True   # Always update
         if ctype == 'exact':
             return False  # Pinned to exact version
-
+        
         v_major, v_minor, v_patch, _ = VersionConstraintChecker.parse_version(version)
-
+        
         if ctype == 'caret':
             # ^1.2.3 means >=1.2.3 <2.0.0
             c_major, c_minor, c_patch, _ = VersionConstraintChecker.parse_version(cvalue)
@@ -1547,26 +1547,26 @@ class VersionConstraintChecker:
                 # Special case: ^0.x allows only patch updates
                 return v_minor == c_minor and v_patch >= c_patch
             return VersionConstraintChecker.compare_versions(version, cvalue) >= 0
-
+        
         if ctype == 'tilde':
             # ~1.2.3 means >=1.2.3 <1.3.0
             c_major, c_minor, c_patch, _ = VersionConstraintChecker.parse_version(cvalue)
             if v_major != c_major or v_minor != c_minor:
                 return False
             return v_patch >= c_patch
-
+        
         if ctype == 'gte':
             return VersionConstraintChecker.compare_versions(version, cvalue) >= 0
-
+        
         if ctype == 'lte':
             return VersionConstraintChecker.compare_versions(version, cvalue) <= 0
-
+        
         if ctype == 'gt':
             return VersionConstraintChecker.compare_versions(version, cvalue) > 0
-
+        
         if ctype == 'lt':
             return VersionConstraintChecker.compare_versions(version, cvalue) < 0
-
+        
         if ctype == 'range':
             # Parse >=1.0 <2.0
             import re
@@ -1577,7 +1577,7 @@ class VersionConstraintChecker:
                 return (VersionConstraintChecker.compare_versions(version, lower) >= 0 and
                         VersionConstraintChecker.compare_versions(version, upper) < 0)
             return False
-
+        
         if ctype == 'wildcard':
             # 1.x means >=1.0.0 <2.0.0
             c_major, c_minor, _, _ = VersionConstraintChecker.parse_version(cvalue)
@@ -1587,37 +1587,37 @@ class VersionConstraintChecker:
             else:
                 # 1.x
                 return v_major == c_major
-
+        
         return False
 
 
 class VersionManager:
     """Manage dependency versions in libs.versions.toml"""
-
+    
     URL_PATTERN = re.compile(r'#\s*(https://mvnrepository\.com/artifact/[^\s]+)(?:\s+@(\S+))?')
     VERSION_PATTERN = re.compile(r'^(\w[\w\-_]*)\s*=\s*"([^"]+)"')
-
+    
     def __init__(self, toml_path: Path):
         self.toml_path = toml_path
         self.entries: List[VersionEntry] = []
         self._parse()
-
+    
     def _parse(self):
         """Parse libs.versions.toml file"""
         if not self.toml_path.exists():
             return
-
+        
         content = self.toml_path.read_text(encoding='utf-8')
         lines = content.split('\n')
-
+        
         in_versions_section = False
         pending_url = None
         pending_constraint = None
         pending_comment_line = 0
-
+        
         for i, line in enumerate(lines, 1):
             stripped = line.strip()
-
+            
             # Track sections
             if stripped.startswith('[versions]'):
                 in_versions_section = True
@@ -1625,10 +1625,10 @@ class VersionManager:
             elif stripped.startswith('[') and stripped.endswith(']'):
                 in_versions_section = False
                 continue
-
+            
             if not in_versions_section:
                 continue
-
+            
             # Check for URL comment
             url_match = self.URL_PATTERN.search(line)
             if url_match:
@@ -1636,13 +1636,13 @@ class VersionManager:
                 pending_constraint = url_match.group(2)  # May be None
                 pending_comment_line = i
                 continue
-
+            
             # Check for version entry
             version_match = self.VERSION_PATTERN.match(stripped)
             if version_match:
                 name = version_match.group(1)
                 version = version_match.group(2)
-
+                
                 entry = VersionEntry(
                     name=name,
                     current_version=version,
@@ -1652,19 +1652,19 @@ class VersionManager:
                     comment_line_number=pending_comment_line if pending_url else 0
                 )
                 self.entries.append(entry)
-
+                
                 # Reset pending
                 pending_url = None
                 pending_constraint = None
                 pending_comment_line = 0
-
+    
     def get_entry(self, name: str) -> Optional[VersionEntry]:
         """Get entry by name"""
         for entry in self.entries:
             if entry.name == name:
                 return entry
         return None
-
+    
     def extract_artifact_coords(self, url: str) -> Tuple[str, str]:
         """Extract groupId and artifactId from Maven URL"""
         # https://mvnrepository.com/artifact/org.jetbrains.kotlin/kotlin-stdlib
@@ -1673,16 +1673,16 @@ class VersionManager:
         if match:
             return (match.group(1), match.group(2))
         return ('', '')
-
+    
     def check_updates(self, maven_central=None, include_recent: bool = False, recent_hours: int = 48) -> List[Dict[str, Any]]:
         """
         Check for available updates.
-
+        
         Returns list of dicts with keys:
             name, current, latest, status, constraint, message
         """
         results = []
-
+        
         for entry in self.entries:
             result = {
                 'name': entry.name,
@@ -1693,14 +1693,14 @@ class VersionManager:
                 'message': '',
                 'age_hours': None
             }
-
+            
             # No URL = skip
             if not entry.url:
                 result['status'] = 'SKIP'
                 result['message'] = 'no source URL'
                 results.append(result)
                 continue
-
+            
             # Pinned
             if entry.constraint == 'pin' or entry.constraint is None:
                 # URL without @constraint = implicitly pinned
@@ -1712,22 +1712,22 @@ class VersionManager:
                     result['message'] = 'implicit pin (no @constraint)'
                 results.append(result)
                 continue
-
+            
             # Exact version constraint
             ctype, cvalue = VersionConstraintChecker.parse_constraint(entry.constraint)
-
+            
             if ctype == 'unknown':
                 result['status'] = 'UNKNOWN'
                 result['message'] = f'invalid constraint @{entry.constraint}'
                 results.append(result)
                 continue
-
+            
             if ctype == 'exact':
                 result['status'] = 'PINNED'
                 result['message'] = f'@{entry.constraint}'
                 results.append(result)
                 continue
-
+            
             # Try to get best matching version
             if maven_central:
                 group_id, artifact_id = self.extract_artifact_coords(entry.url)
@@ -1735,14 +1735,14 @@ class VersionManager:
                     try:
                         # First check if artifact exists at all
                         all_versions = maven_central.get_versions(group_id, artifact_id, limit=1, include_prerelease=True)
-
+                        
                         if not all_versions:
                             # Artifact not found on Maven Central
                             result['status'] = 'NOT_FOUND'
                             result['message'] = f'not on Maven Central - check manually: {entry.url}'
                             results.append(result)
                             continue
-
+                        
                         # For @* (latest), get latest stable version with age info
                         if ctype == 'latest':
                             version_info = maven_central.get_version_info(group_id, artifact_id)
@@ -1758,9 +1758,9 @@ class VersionManager:
                                 ctype, cvalue,
                                 entry.current_version
                             )
-
+                        
                         result['latest'] = latest
-
+                        
                         if latest is None:
                             result['status'] = 'VIOLATE'
                             result['message'] = f'no version satisfies @{entry.constraint}'
@@ -1785,20 +1785,20 @@ class VersionManager:
             else:
                 result['status'] = 'NO_API'
                 result['message'] = 'Maven Central API not available'
-
+            
             results.append(result)
-
+        
         return results
-
+    
     def update_version(self, name: str, new_version: str) -> bool:
         """Update a version in the TOML file"""
         entry = self.get_entry(name)
         if not entry:
             return False
-
+        
         content = self.toml_path.read_text(encoding='utf-8')
         lines = content.split('\n')
-
+        
         # Update the line
         line_idx = entry.line_number - 1
         old_line = lines[line_idx]
@@ -1808,13 +1808,13 @@ class VersionManager:
             old_line
         )
         lines[line_idx] = new_line
-
+        
         # Write back
         self.toml_path.write_text('\n'.join(lines), encoding='utf-8')
-
+        
         # Update entry
         entry.current_version = new_version
-
+        
         return True
 
 
@@ -2019,7 +2019,7 @@ class TemplateRepository:
             )
 
             print_success(f"Updated {self.name} templates ({behind_count} new commits)")
-
+            
             # Show commit details
             if commit_details:
                 print()
@@ -2028,7 +2028,7 @@ class TemplateRepository:
                     if line.strip():
                         print(f"     {line}")
                 print()
-
+            
             return True
 
         except subprocess.CalledProcessError as e:
@@ -2233,20 +2233,20 @@ class TemplateVariable:
     default_value: Optional[str] = None  # Default value
     locations: List[Tuple[Path, int]] = field(default_factory=list)  # [(file, line_number), ...]
     is_enhanced: bool = False   # True if has hint, False if plain {{ var }}
-
+    
     def validate(self, value: str) -> Tuple[bool, str]:
         """
         Validate value against regex pattern
-
+        
         Args:
             value: Value to validate
-
+        
         Returns:
             (is_valid, error_message)
         """
         if not self.regex_pattern:
             return True, ""
-
+        
         try:
             pattern = re.compile(f"^{self.regex_pattern}$")
             if pattern.match(str(value)):
@@ -2260,11 +2260,11 @@ class TemplateVariable:
 class TemplateHintParser:
     """
     Parse template files for variables with inline hints
-
+    
     Supports two formats:
     1. Plain: {{ variable_name }}
     2. Enhanced: {{ @@[sort]|(regex)|[help_text]=[default]@@variable_name }}
-
+    
     Enhanced format:
     - @@ markers delimit the hint
     - Optional sort order (e.g., 01|) for menu ordering
@@ -2273,7 +2273,7 @@ class TemplateHintParser:
     - Optional default value after = in help text
     - Variable name follows the second @@
     - | is used as separator (better than : for Windows paths, URLs, etc.)
-
+    
     Examples:
         {{ @@01|Maven group ID (e.g. com.company)=com.example@@group }}
         {{ @@03|(11|17|21)|JDK version=21@@jdk_version }}
@@ -2281,11 +2281,11 @@ class TemplateHintParser:
         {{ @@04|(c:\\user|c:\\home)|Install Dir=c:\\home@@install_dir }}
         {{ @@02|Application version@@version }}
         {{ project_name }}
-
+        
     Compiles to:
         {{ group }}, {{ jdk_version }}, {{ db_type }}, {{ install_dir }}, {{ version }}, {{ project_name }}
     """
-
+    
     # Regex patterns
     ENHANCED_PATTERN = re.compile(
         r'\{\{\s*@@'                                # {{ @@
@@ -2296,78 +2296,78 @@ class TemplateHintParser:
         r'([a-zA-Z_][a-zA-Z0-9_]*)'                # Variable name
         r'\s*\}\}'                                  # }}
     )
-
+    
     PLAIN_PATTERN = re.compile(
         r'\{\{\s*'                      # {{
         r'([a-zA-Z_][a-zA-Z0-9_]*)'    # Variable name
         r'\s*\}\}'                      # }}
     )
-
+    
     def __init__(self, template_dir: Path):
         self.template_dir = template_dir
         self.variables: Dict[str, TemplateVariable] = {}
-
+    
     def parse_templates(self) -> Dict[str, TemplateVariable]:
         """
         Parse all template files and extract variables
-
+        
         Returns:
             Dict mapping variable name to TemplateVariable
         """
         # Find all template files
         template_files = self._find_template_files()
-
+        
         # Parse each file
         for file_path in template_files:
             self._parse_file(file_path)
-
+        
         return self.variables
-
+    
     def _find_template_files(self) -> List[Path]:
         """Find all files that could contain Jinja2 templates"""
         extensions = [
-            '.gradle.kts', '.gradle', '.kt', '.kts',
+            '.gradle.kts', '.gradle', '.kt', '.kts', 
             '.properties', '.yml', '.yaml', '.xml',
             '.toml', '.json', '.md', '.txt', '.sh'
         ]
-
+        
         files = []
         for ext in extensions:
             files.extend(self.template_dir.rglob(f'*{ext}'))
-
+        
         # Exclude certain directories
         exclude_dirs = {'.git', 'build', 'gradle', '.gradle'}
         files = [
-            f for f in files
+            f for f in files 
             if not any(ex in f.parts for ex in exclude_dirs)
         ]
-
+        
         return files
-
+    
     def _parse_file(self, file_path: Path):
         """Parse a single file for template variables"""
         try:
             content = file_path.read_text(encoding='utf-8')
         except (UnicodeDecodeError, PermissionError):
             return
-
+        
         lines = content.split('\n')
-
+        
         for line_num, line in enumerate(lines, 1):
             # Try enhanced pattern first
             for match in self.ENHANCED_PATTERN.finditer(line):
                 sort_str, regex_pattern, help_and_default, var_name = match.groups()
                 sort_order = int(sort_str) if sort_str else 999
-
+                
                 # Extract help text and default value
                 help_text = help_and_default.strip()
                 default_value = None
-
+                
                 if '=' in help_text:
                     parts = help_text.rsplit('=', 1)  # Split from right to handle = in help text
                     help_text = parts[0].strip()
                     default_value = parts[1].strip() if len(parts) > 1 else None
-
+                
                 self._add_variable(
                     var_name=var_name,
                     help_text=help_text,
@@ -2378,11 +2378,11 @@ class TemplateHintParser:
                     line_number=line_num,
                     is_enhanced=True
                 )
-
+            
             # Then check for plain variables (only if not already found as enhanced)
             for match in self.PLAIN_PATTERN.finditer(line):
                 var_name = match.group(1)
-
+                
                 # Skip if already found as enhanced in this line
                 if var_name not in self.variables or not self.variables[var_name].is_enhanced:
                     self._add_variable(
@@ -2395,7 +2395,7 @@ class TemplateHintParser:
                         line_number=line_num,
                         is_enhanced=False
                     )
-
+    
     def _add_variable(self, var_name: str, help_text: str, sort_order: int,
                      regex_pattern: Optional[str], default_value: Optional[str],
                      file_path: Path, line_number: int, is_enhanced: bool):
@@ -2403,7 +2403,7 @@ class TemplateHintParser:
         if var_name in self.variables:
             var = self.variables[var_name]
             var.locations.append((file_path, line_number))
-
+            
             # If we found an enhanced version, upgrade plain to enhanced
             if is_enhanced and not var.is_enhanced:
                 var.help_text = help_text
@@ -2421,23 +2421,23 @@ class TemplateHintParser:
                 locations=[(file_path, line_number)],
                 is_enhanced=is_enhanced
             )
-
+    
     def get_sorted_variables(self) -> List[TemplateVariable]:
         """Get variables sorted by sort_order, then name"""
         return sorted(
             self.variables.values(),
             key=lambda v: (v.sort_order, v.name)
         )
-
+    
     def compile_template(self, file_path: Path) -> str:
         """
         Compile template file by removing hints
-
+        
         Converts:
           {{ @@01|(11|17|21)|Help text=default@@variable }}
         To:
           {{ variable }}
-
+        
         Returns:
             Compiled template content
         """
@@ -2445,12 +2445,12 @@ class TemplateHintParser:
             content = file_path.read_text(encoding='utf-8')
         except (UnicodeDecodeError, PermissionError):
             return ""
-
+        
         # Replace enhanced patterns with plain variables
         def replace_enhanced(match):
             _, _, _, var_name = match.groups()  # sort, regex, help, varname
             return '{{ ' + var_name + ' }}'
-
+        
         compiled = self.ENHANCED_PATTERN.sub(replace_enhanced, content)
         return compiled
 
@@ -2458,13 +2458,13 @@ class TemplateHintParser:
 class TemplateMetadata:
     """
     Parse and manage template metadata
-
+    
     Supports two sources:
     1. TEMPLATE.md YAML frontmatter (legacy)
     2. Inline hints in template files (new)
-
+    
     Inline hints take precedence for discovered variables.
-
+    
     Additionally manages compiled template cache to avoid
     re-compiling templates on every render.
     """
@@ -2473,87 +2473,87 @@ class TemplateMetadata:
         self.template_path = template_path
         self.compiled_cache_dir = compiled_cache_dir
         self.metadata = self._parse_metadata()
-
+        
         # Parse inline hints from template files
         self.hint_parser = TemplateHintParser(template_path)
         self.hint_variables = self.hint_parser.parse_templates()
-
+        
         # Initialize compiled cache if provided
         if self.compiled_cache_dir:
             self._ensure_cache_structure()
-
+    
     def _ensure_cache_structure(self):
         """Ensure compiled cache directory exists"""
         if self.compiled_cache_dir:
             self.compiled_cache_dir.mkdir(parents=True, exist_ok=True)
-
+    
     def _get_compiled_file_path(self, source_file: Path) -> Optional[Path]:
         """
         Get path for compiled version of template file
-
+        
         Args:
             source_file: Original template file path
-
+        
         Returns:
             Path to compiled file in cache, or None if no cache configured
         """
         if not self.compiled_cache_dir:
             return None
-
+        
         # Create relative path from template root
         try:
             rel_path = source_file.relative_to(self.template_path)
         except ValueError:
             # File not in template directory
             return None
-
+        
         # Create unique cache path based on template name and file path
         template_name = self.template_path.name
         cache_file = self.compiled_cache_dir / template_name / rel_path
-
+        
         return cache_file
-
+    
     def _is_cache_valid(self, source_file: Path, compiled_file: Path) -> bool:
         """
         Check if compiled cache is still valid
-
+        
         Args:
             source_file: Original template file
             compiled_file: Compiled cache file
-
+        
         Returns:
             True if cache is valid (compiled file is newer than source)
         """
         if not compiled_file.exists():
             return False
-
+        
         source_mtime = source_file.stat().st_mtime
         compiled_mtime = compiled_file.stat().st_mtime
-
+        
         return compiled_mtime >= source_mtime
-
+    
     def get_compiled_content(self, source_file: Path) -> str:
         """
         Get compiled template content (cached or freshly compiled)
-
+        
         This method handles caching logic:
         1. Check if compiled cache exists and is valid
         2. If valid, return cached content
         3. Otherwise, compile template and cache result
-
+        
         Args:
             source_file: Original template file path
-
+        
         Returns:
             Compiled template content (with hints removed)
         """
         # Get cache file path
         compiled_file = self._get_compiled_file_path(source_file)
-
+        
         # If no cache configured, compile directly
         if not compiled_file:
             return self.hint_parser.compile_template(source_file)
-
+        
         # Check if cache is valid
         if self._is_cache_valid(source_file, compiled_file):
             # Return cached content
@@ -2562,10 +2562,10 @@ class TemplateMetadata:
             except (OSError, UnicodeDecodeError):
                 # Cache corrupted, recompile
                 pass
-
+        
         # Compile template
         compiled_content = self.hint_parser.compile_template(source_file)
-
+        
         # Cache compiled content
         try:
             compiled_file.parent.mkdir(parents=True, exist_ok=True)
@@ -2573,7 +2573,7 @@ class TemplateMetadata:
         except OSError:
             # Failed to cache, but we have compiled content
             pass
-
+        
         return compiled_content
 
     def _parse_metadata(self) -> Dict[str, Any]:
@@ -2619,16 +2619,16 @@ class TemplateMetadata:
     def get_arguments(self) -> List[TemplateArgument]:
         """
         Get template-specific arguments
-
+        
         Combines:
         1. Arguments from TEMPLATE.md (legacy)
         2. Variables from inline hints (new)
-
+        
         Inline hints take precedence.
         """
         arguments = []
         seen_names = set()
-
+        
         # First, add variables from inline hints
         for var in self.hint_parser.get_sorted_variables():
             arguments.append(TemplateArgument(
@@ -2641,13 +2641,13 @@ class TemplateMetadata:
                 required=False
             ))
             seen_names.add(var.name)
-
+        
         # Then add from TEMPLATE.md (if not already added)
         args_data = self.metadata.get('arguments', [])
         for arg_data in args_data:
             if not isinstance(arg_data, dict):
                 continue
-
+            
             name = arg_data.get('name', '')
             if name and name not in seen_names:
                 arguments.append(TemplateArgument(
@@ -2680,26 +2680,26 @@ class TemplateMetadata:
     def get_requirements(self) -> Dict[str, str]:
         """Get template requirements"""
         return self.metadata.get('requirements', {})
-
+    
     def get_hint_variables(self) -> Dict[str, TemplateVariable]:
         """Get variables discovered from inline hints"""
         return self.hint_variables
-
+    
     def get_template_hints(self) -> List[TemplateVariable]:
         """
         Get list of template variables with hints
-
+        
         Returns sorted list of TemplateVariable objects from inline hints
         """
         return self.hint_parser.get_sorted_variables()
-
+    
     def get_raw_copy_files(self) -> set:
         """
         Get set of files that should be copied without Jinja2 processing.
-
+        
         These files are copied as-is (raw copy) without template rendering
         and are defined in TEMPLATE.md under 'raw_copy' list.
-
+        
         Returns:
             Set of filenames that should be raw copied
         """
@@ -2707,14 +2707,14 @@ class TemplateMetadata:
         if isinstance(raw_copy, list):
             return set(raw_copy)
         return set()
-
+    
     def compile_template_file(self, file_path: Path) -> str:
         """
         Compile a template file by removing inline hints
-
+        
         Uses caching to avoid recompiling unchanged templates.
         Cache is invalidated when source file is modified.
-
+        
         Returns compiled content ready for Jinja2
         """
         return self.get_compiled_content(file_path)
@@ -2730,7 +2730,7 @@ class DynamicCLIBuilder:
     @staticmethod
     def create_base_parser() -> argparse.ArgumentParser:
         """Create parser with base arguments"""
-
+        
         # Load maven_recent_hours from config for help text
         recent_hours = 48  # Default
         try:
@@ -2740,13 +2740,13 @@ class DynamicCLIBuilder:
                 recent_hours = config.get('versions', {}).get('maven_recent_hours', 48)
         except Exception:
             pass
-
+        
         parser = argparse.ArgumentParser(
             description=f'Gradle Project Initializer v{SCRIPT_VERSION}',
             formatter_class=argparse.RawDescriptionHelpFormatter,
             add_help=True
         )
-
+        
         # Add version argument
         parser.add_argument('-v', '--version', action='version',
                           version=f'gradleInit v{SCRIPT_VERSION}')
@@ -3156,7 +3156,7 @@ def setup_jinja2_environment(template_path: Path, context: Dict[str, Any] = None
             return dt.strftime(fmt)
         except (ValueError, AttributeError):
             return str(dt_str)
-
+    
     env.filters['datetime'] = format_datetime
     env.filters['date'] = lambda dt, fmt='%Y-%m-%d': format_datetime(dt, fmt)
     env.filters['time'] = lambda dt, fmt='%H:%M:%S': format_datetime(dt, fmt)
@@ -3168,7 +3168,7 @@ def setup_jinja2_environment(template_path: Path, context: Dict[str, Any] = None
     # Add utility functions as globals
     env.globals['now'] = datetime.now
     env.globals['datetime'] = datetime
-
+    
     # Add environment access
     import os as _os
     env.globals['env'] = _os.environ.get
@@ -3378,7 +3378,7 @@ class ProjectGenerator:
     def _render_text_file(self, source_file: Path, target_file: Path):
         """
         Render text file with Jinja2
-
+        
         If template_metadata is available, compiles the template first
         to remove inline hints before Jinja2 rendering.
 
@@ -3501,7 +3501,7 @@ class ProjectGenerator:
         gradle_build = self.target_path / 'build.gradle.kts'
         if not gradle_build.exists():
             gradle_build = self.target_path / 'build.gradle'
-
+        
         settings_gradle = self.target_path / 'settings.gradle.kts'
         if not settings_gradle.exists():
             settings_gradle = self.target_path / 'settings.gradle'
@@ -3720,7 +3720,7 @@ class ProjectGenerator:
 class SubprojectGenerator:
     """
     Generate a subproject within an existing multi-module Gradle project.
-
+    
     Unlike ProjectGenerator, this:
     - Skips files defined in subproject_mode.skip
     - Uses alternative build file (build.gradle.kts.subproject)
@@ -3737,7 +3737,7 @@ class SubprojectGenerator:
                  subproject_name: str):
         """
         Initialize subproject generator.
-
+        
         Args:
             template_path: Path to template directory
             template_metadata: Template metadata with subproject_mode config
@@ -3752,7 +3752,7 @@ class SubprojectGenerator:
         self.subproject_name = subproject_name
         self.target_path = root_path / subproject_name
         self.jinja_env = setup_jinja2_environment(template_path, context)
-
+        
         # Get subproject_mode config
         self.subproject_config = template_metadata.metadata.get('subproject_mode', {})
         self.skip_patterns = set(self.subproject_config.get('skip', []))
@@ -3762,7 +3762,7 @@ class SubprojectGenerator:
     def generate(self) -> bool:
         """
         Generate subproject.
-
+        
         Returns:
             True if successful
         """
@@ -3771,39 +3771,39 @@ class SubprojectGenerator:
             if not self.subproject_config:
                 print_error(f"Template does not support subproject mode")
                 return False
-
+            
             # Check if target already exists
             if self.target_path.exists():
                 print_error(f"Directory already exists: {self.target_path}")
                 return False
-
+            
             # Create target directory
             self.target_path.mkdir(parents=True, exist_ok=True)
-
+            
             print_info("Processing template files...")
-
+            
             # Process template files (with skip logic)
             self._process_directory(self.template_path, self.target_path)
-
+            
             # Handle alternative build file
             if self.build_file:
                 self._process_build_file()
-
+            
             # Merge versions if specified
             if self.merge_versions_file:
                 self._merge_versions()
-
+            
             # Update settings.gradle.kts
             self._update_settings()
-
+            
             # Git add
             self._git_add()
-
+            
             print_success(f"Subproject '{self.subproject_name}' added")
             print_info("Run 'git status' to review, then commit when ready")
-
+            
             return True
-
+            
         except Exception as e:
             print_error(f"Failed to create subproject: {e}")
             import traceback
@@ -3827,30 +3827,30 @@ class SubprojectGenerator:
         """Process directory recursively"""
         for item in source_dir.iterdir():
             rel_path = str(item.relative_to(self.template_path))
-
+            
             # Skip patterns
             if self._should_skip(rel_path):
                 continue
-
+            
             # Skip TEMPLATE.md and build file alternative
             if item.name in ('TEMPLATE.md', self.build_file):
                 continue
-
+            
             # Skip original build.gradle.kts if we have an alternative
             if item.name == 'build.gradle.kts' and self.build_file:
                 continue
-
+            
             # Skip .subproject files
             if item.name.endswith('.subproject'):
                 continue
-
+            
             # Skip raw_copy files that are in skip list
             raw_copy = self.template_metadata.get_raw_copy_files()
             if item.name in raw_copy and self._should_skip(item.name):
                 continue
-
+            
             target_item = target_dir / item.name
-
+            
             if item.is_dir():
                 target_item.mkdir(parents=True, exist_ok=True)
                 self._process_directory(item, target_item)
@@ -3860,7 +3860,7 @@ class SubprojectGenerator:
     def _process_file(self, source_file: Path, target_file: Path):
         """Process single file"""
         target_file.parent.mkdir(parents=True, exist_ok=True)
-
+        
         # Handle .raw suffix
         if source_file.name.endswith('.raw'):
             # Copy without processing, remove .raw suffix
@@ -3869,7 +3869,7 @@ class SubprojectGenerator:
             rel_path = source_file.relative_to(self.template_path)
             print_info(f"  [OK] {rel_path} (raw)")
             return
-
+        
         # Check for raw copy from metadata
         raw_copy = self.template_metadata.get_raw_copy_files()
         if source_file.name in raw_copy:
@@ -3877,7 +3877,7 @@ class SubprojectGenerator:
             rel_path = source_file.relative_to(self.template_path)
             print_info(f"  [OK] {rel_path} (raw)")
             return
-
+        
         # Render template
         try:
             if self.template_metadata:
@@ -3886,13 +3886,13 @@ class SubprojectGenerator:
             else:
                 rel_path = str(source_file.relative_to(self.template_path)).replace('\\', '/')
                 template = self.jinja_env.get_template(rel_path)
-
+            
             content = template.render(**self.context)
             target_file.write_text(content, encoding='utf-8')
-
+            
             rel_path = source_file.relative_to(self.template_path)
             print_info(f"  [OK] {rel_path}")
-
+            
         except Exception as e:
             print_error(f"Error rendering {source_file.name}: {e}")
             raise
@@ -3901,11 +3901,11 @@ class SubprojectGenerator:
         """Process alternative build file"""
         source_file = self.template_path / self.build_file
         target_file = self.target_path / 'build.gradle.kts'
-
+        
         if not source_file.exists():
             print_warning(f"Build file not found: {self.build_file}")
             return
-
+        
         try:
             compiled_content = self.template_metadata.compile_template_file(source_file)
             template = self.jinja_env.from_string(compiled_content)
@@ -3920,19 +3920,19 @@ class SubprojectGenerator:
         """Merge template versions into root libs.versions.toml"""
         template_versions = self.template_path / self.merge_versions_file
         root_versions = self.root_path / 'gradle' / 'libs.versions.toml'
-
+        
         if not template_versions.exists():
             print_warning(f"Template versions file not found: {self.merge_versions_file}")
             return
-
+        
         if not root_versions.exists():
             print_warning("Root libs.versions.toml not found")
             return
-
+        
         try:
             # Read and RENDER template content (resolve {{ variables }})
             template_raw = template_versions.read_text(encoding='utf-8')
-
+            
             # Compile template to remove hints, then render
             if self.template_metadata:
                 # Remove inline hints using the pattern directly
@@ -3950,37 +3950,37 @@ class SubprojectGenerator:
                     r'\s*\}\}',
                     re.DOTALL
                 )
-
+                
                 def replace_enhanced(match):
                     var_name = match.group(5)  # variable name is group 5
                     return '{{ ' + var_name + ' }}'
-
+                
                 compiled = ENHANCED_PATTERN.sub(replace_enhanced, template_raw)
-
+                
                 # Render Jinja2 variables
                 jinja_template = self.jinja_env.from_string(compiled)
                 template_content = jinja_template.render(**self.context)
             else:
                 template_content = template_raw
-
+            
             root_content = root_versions.read_text(encoding='utf-8')
-
+            
             # Simple merge: find new entries and append
             merged = self._merge_toml_content(root_content, template_content)
-
+            
             if merged != root_content:
                 root_versions.write_text(merged, encoding='utf-8')
                 print_info("  [OK] Merged versions into gradle/libs.versions.toml")
             else:
                 print_info("  [--] No new versions to merge")
-
+                
         except Exception as e:
             print_warning(f"Could not merge versions: {e}")
 
     def _merge_toml_content(self, root: str, template: str) -> str:
         """
         Merge TOML content (simple implementation).
-
+        
         Adds entries from template that don't exist in root.
         Preserves comments above each entry.
         """
@@ -3990,7 +3990,7 @@ class SubprojectGenerator:
             sections = {}
             current_section = None
             pending_comments = []
-
+            
             for line in content.split('\n'):
                 stripped = line.strip()
                 if stripped.startswith('[') and stripped.endswith(']'):
@@ -4008,10 +4008,10 @@ class SubprojectGenerator:
                     if current_section == 'versions':
                         pending_comments = []
             return sections
-
+        
         root_sections = parse_sections(root)
         template_sections = parse_sections(template)
-
+        
         # Find new entries with their comments
         additions = {}
         for section, entries in template_sections.items():
@@ -4020,7 +4020,7 @@ class SubprojectGenerator:
             for key, (line, comments) in entries.items():
                 if section not in root_sections or key not in root_sections[section]:
                     additions[section].append((line, comments))
-
+        
         # Append new entries to root
         result = root.rstrip()
         for section, entries in additions.items():
@@ -4059,29 +4059,29 @@ class SubprojectGenerator:
                         for comment in comments:
                             result += f'{comment}\n'
                         result += f'{entry_line}\n'
-
+        
         return result
 
     def _update_settings(self):
         """Update settings.gradle.kts with include()"""
         settings_file = self.root_path / 'settings.gradle.kts'
-
+        
         if not settings_file.exists():
             print_warning("settings.gradle.kts not found")
             return
-
+        
         content = settings_file.read_text(encoding='utf-8')
         include_line = f'include("{self.subproject_name}")'
-
+        
         if include_line in content:
             print_info(f"  [--] {self.subproject_name} already in settings.gradle.kts")
             return
-
+        
         # Add include at end of file
         if not content.endswith('\n'):
             content += '\n'
         content += f'{include_line}\n'
-
+        
         settings_file.write_text(content, encoding='utf-8')
         print_info(f"  [OK] Added include(\"{self.subproject_name}\") to settings.gradle.kts")
 
@@ -4095,11 +4095,11 @@ class SubprojectGenerator:
                 capture_output=True,
                 text=True
             )
-
+            
             if result.returncode != 0:
                 print_info("Not in a git repository - skipping git add")
                 return
-
+            
             # Git add
             subprocess.run(
                 ['git', 'add', '.'],
@@ -4108,7 +4108,7 @@ class SubprojectGenerator:
                 text=True
             )
             print_info("  [OK] git add .")
-
+            
         except FileNotFoundError:
             print_info("Git not available - skipping git add")
 
@@ -4317,28 +4317,28 @@ def handle_config_command(args: argparse.Namespace, paths: GradleInitPaths) -> i
 def get_config_default(config: Dict[str, Any], key: str, fallback: Any = None) -> Any:
     """
     Get default value from config with fallback
-
+    
     Checks in order:
     1. config['defaults'][key]
     2. config['custom'][key]
     3. fallback value
-
+    
     Args:
         config: Loaded configuration dictionary
         key: Configuration key to look up
         fallback: Fallback value if not found
-
+        
     Returns:
         Configuration value or fallback
     """
     # Check defaults section
     if 'defaults' in config and key in config['defaults']:
         return config['defaults'][key]
-
+    
     # Check custom section
     if 'custom' in config and key in config['custom']:
         return config['custom'][key]
-
+    
     # Return fallback
     return fallback
 
@@ -4346,17 +4346,17 @@ def get_config_default(config: Dict[str, Any], key: str, fallback: Any = None) -
 def validate_value_against_hint(value: str, hint: 'TemplateVariable') -> Tuple[bool, Optional[str]]:
     """
     Validate a value against a template hint's regex pattern
-
+    
     Args:
         value: Value to validate
         hint: TemplateVariable with regex_pattern
-
+        
     Returns:
         Tuple of (is_valid, error_message)
     """
     if not hint.regex_pattern:
         return True, None
-
+    
     try:
         if not re.match(f"^{hint.regex_pattern}$", str(value)):
             error_msg = f"Value '{value}' does not match pattern: {hint.regex_pattern}"
@@ -4367,25 +4367,25 @@ def validate_value_against_hint(value: str, hint: 'TemplateVariable') -> Tuple[b
         # Invalid regex pattern in template
         print_warning(f"Invalid regex pattern in template: {e}")
         return True, None
-
+    
     return True, None
 
 
-def prompt_with_validation(prompt_text: str,
-                          default: Any,
+def prompt_with_validation(prompt_text: str, 
+                          default: Any, 
                           hint: Optional['TemplateVariable'] = None,
                           allow_empty: bool = True,
                           source: str = None) -> str:
     """
     Prompt user for input with validation and re-prompting on error
-
+    
     Args:
         prompt_text: Text to display to user
         default: Default value if user enters nothing
         hint: Optional TemplateVariable for validation
         allow_empty: Allow empty input (uses default)
         source: Optional source description for default value (e.g., "from config")
-
+        
     Returns:
         Validated user input or default
     """
@@ -4395,9 +4395,9 @@ def prompt_with_validation(prompt_text: str,
             full_prompt = f"{prompt_text} [{default}]: "
         else:
             full_prompt = f"{prompt_text}: "
-
+        
         user_input = input(full_prompt).strip()
-
+        
         # Handle empty input
         if not user_input:
             if allow_empty and default is not None:
@@ -4407,7 +4407,7 @@ def prompt_with_validation(prompt_text: str,
                 continue
             else:
                 return user_input
-
+        
         # Validate against hint if provided
         if hint:
             is_valid, error_msg = validate_value_against_hint(user_input, hint)
@@ -4416,60 +4416,60 @@ def prompt_with_validation(prompt_text: str,
                 if hint.default_value:
                     print_info(f"Press Enter to use default: {hint.default_value}")
                 continue
-
+        
         return user_input
 
 
-def validate_cli_args_against_template(args: Dict[str, Any],
+def validate_cli_args_against_template(args: Dict[str, Any], 
                                        hints: List['TemplateVariable']) -> Tuple[bool, List[str]]:
     """
     Validate CLI arguments against template hints
-
+    
     Args:
         args: Dictionary of CLI arguments
         hints: List of TemplateVariable hints from template
-
+        
     Returns:
         Tuple of (all_valid, list_of_errors)
     """
     errors = []
-
+    
     for hint in hints:
         # Get value from args using name
         value = args.get(hint.name)
-
+        
         if value is None:
             continue
-
+        
         # Validate against regex
         is_valid, error_msg = validate_value_against_hint(value, hint)
         if not is_valid:
             errors.append(f"Argument '--{hint.name}': {error_msg}")
-
+    
     return len(errors) == 0, errors
 
 
 def find_gradle_root(start_path: Path = None) -> Optional[Path]:
     """
     Find the root of a Gradle project by looking for settings.gradle.kts.
-
+    
     Args:
         start_path: Starting directory (defaults to current directory)
-
+    
     Returns:
         Path to project root, or None if not found
     """
     if start_path is None:
         start_path = Path.cwd()
-
+    
     current = start_path.resolve()
-
+    
     while current != current.parent:
         settings = current / 'settings.gradle.kts'
         if settings.exists():
             return current
         current = current.parent
-
+    
     return None
 
 
@@ -4566,7 +4566,7 @@ def handle_init_command(args: argparse.Namespace,
 
     # Load config BEFORE interactive prompts so we can use config defaults
     config = load_config(paths.config_file)
-
+    
     # Find and load template early if provided (needed for template-aware help and validation)
     template_path = None
     metadata = None
@@ -4574,7 +4574,7 @@ def handle_init_command(args: argparse.Namespace,
         template_path = repo_manager.find_template(args.template)
         if template_path:
             metadata = TemplateMetadata(template_path, paths.compiled_templates)
-
+    
     # Template-aware help
     if args.help:
         # If template is loaded, show template-specific help
@@ -4583,19 +4583,19 @@ def handle_init_command(args: argparse.Namespace,
             template_desc = metadata.metadata.get('description', '')
             template_version = metadata.metadata.get('version', '')
             template_help = metadata.metadata.get('help', '')
-
+            
             print_header(f"{template_name} Template")
             if template_desc:
                 print(f"{template_desc}")
             if template_version:
                 print(f"Version: {template_version}")
             print()
-
+            
             # Show custom help text from TEMPLATE.md if available
             if template_help:
                 print(template_help.strip())
                 print()
-
+            
             # Show arguments/options
             template_args = metadata.get_arguments()
             if template_args:
@@ -4604,14 +4604,14 @@ def handle_init_command(args: argparse.Namespace,
                     required_str = " (required)" if arg.required else ""
                     default_str = f" [default: {arg.default}]" if arg.default is not None and not arg.required else ""
                     type_hint = f" <{arg.type}>" if arg.type and arg.type != 'string' else ""
-
+                    
                     if arg.type == 'boolean':
                         print(f"  --config {arg.name}=true|false")
                     else:
                         print(f"  --{arg.name}{type_hint}")
                     print(f"      {arg.help}{required_str}{default_str}")
                 print()
-
+            
             # Show requirements if any
             requirements = metadata.metadata.get('requirements', {})
             if requirements:
@@ -4660,7 +4660,7 @@ def handle_init_command(args: argparse.Namespace,
         if metadata:
             for hint in metadata.get_template_hints():
                 hints_map[hint.name] = hint
-
+        
         # Prompt for group with config default
         if not args.group:
             default_group = get_config_default(config, 'group', 'com.example')
@@ -4690,14 +4690,14 @@ def handle_init_command(args: argparse.Namespace,
                 default_gradle = get_config_default(config, 'gradle_version', DEFAULT_GRADLE_VERSION)
                 args.gradle_version = input(f"Gradle version [{default_gradle}]: ").strip() or default_gradle
             # else: use default (will be set later)
-
+        
         # Prompt for any other template-specific variables with hints
         if metadata:
             for hint in sorted(hints_map.values(), key=lambda h: h.sort_order):
                 # Skip already handled variables
                 if hint.name in ['group', 'version', 'project_name', 'gradle_version', 'kotlin_version']:
                     continue
-
+                
                 # Check if CLI arg exists for this hint
                 cli_value = getattr(args, hint.name, None)
                 if cli_value is None:
@@ -4724,7 +4724,7 @@ def handle_init_command(args: argparse.Namespace,
     # Load template metadata if not already loaded
     if not metadata:
         metadata = TemplateMetadata(template_path, paths.compiled_templates)
-
+    
     # CLI Validation - validate all CLI args against template hints
     if not args.interactive:
         # Only validate in non-interactive mode (interactive mode validates during prompts)
@@ -4783,10 +4783,10 @@ def handle_init_command(args: argparse.Namespace,
 
         # Build rendering context
         # Config already loaded earlier
-
+        
         # Prepare CLI args dict and map project_version to version
         cli_args_dict = vars(args)
-
+        
         # Map project_version to version, but ONLY if explicitly set
         if 'project_version' in cli_args_dict and cli_args_dict['project_version'] is not None:
             cli_args_dict['version'] = cli_args_dict['project_version']
@@ -4794,7 +4794,7 @@ def handle_init_command(args: argparse.Namespace,
             # Remove version if it exists but project_version wasn't set
             # This allows config defaults to be used
             del cli_args_dict['version']
-
+        
         context_builder = ContextBuilder(
             config=config,
             env_vars=dict(os.environ),
@@ -4899,12 +4899,12 @@ def handle_subproject_command(args: argparse.Namespace,
                                repo_manager: TemplateRepositoryManager) -> int:
     """
     Handle subproject command - Add a subproject to existing multi-module project.
-
+    
     Args:
         args: Parsed arguments
         paths: GradleInit paths
         repo_manager: Template repository manager
-
+    
     Returns:
         Exit code (0 for success)
     """
@@ -4914,9 +4914,9 @@ def handle_subproject_command(args: argparse.Namespace,
         print_error("Not in a Gradle project (no settings.gradle.kts found)")
         print_info("Run this command from within an existing Gradle project")
         return 1
-
+    
     print_info(f"Gradle project root: {root_path}")
-
+    
     # Find template
     template_path = repo_manager.find_template(args.template)
     if not template_path:
@@ -4925,10 +4925,10 @@ def handle_subproject_command(args: argparse.Namespace,
         for name, tmpl_path in repo_manager.list_templates():
             print(f"  - {name}")
         return 1
-
+    
     # Load template metadata
     metadata = TemplateMetadata(template_path, paths.compiled_templates)
-
+    
     # Show help if requested
     if getattr(args, 'help', False):
         print(f"\nTemplate: {args.template}")
@@ -4941,7 +4941,7 @@ def handle_subproject_command(args: argparse.Namespace,
         print("  --config KEY=VALUE    Set configuration value (can be used multiple times)")
         print("  --interactive, -i     Interactive mode")
         print()
-
+        
         # Show template arguments
         arguments = metadata.get_arguments()
         if arguments:
@@ -4950,7 +4950,7 @@ def handle_subproject_command(args: argparse.Namespace,
                 default_str = f" (default: {arg.default})" if arg.default is not None else ""
                 print(f"  {arg.context_key}: {arg.help}{default_str}")
             print()
-
+        
         # Show template hints
         hints = metadata.get_template_hints()
         if hints:
@@ -4958,32 +4958,32 @@ def handle_subproject_command(args: argparse.Namespace,
             for hint in hints:
                 default_str = f" (default: {hint.default_value})" if hint.default_value else ""
                 print(f"  {hint.name}: {hint.help_text or 'No description'}{default_str}")
-
+        
         return 0
-
+    
     # Check if template supports subproject mode
     subproject_config = metadata.metadata.get('subproject_mode')
     if not subproject_config:
         print_error(f"Template '{args.template}' does not support subproject mode")
         print_info("Only templates with 'subproject_mode' in TEMPLATE.md can be used")
         return 1
-
+    
     # Load config
     config = load_config(paths.config_file)
-
+    
     # Build context
     context = {}
-
+    
     # Add defaults from config
     if 'defaults' in config:
         context.update(config['defaults'])
     if 'custom' in config:
         context.update(config['custom'])
-
+    
     # Override with CLI args
     if args.group:
         context['group'] = args.group
-
+    
     # Process --config arguments
     if args.config:
         for config_item in args.config:
@@ -4998,23 +4998,23 @@ def handle_subproject_command(args: argparse.Namespace,
             else:
                 print_error(f"Invalid config format: {config_item} (expected KEY=VALUE)")
                 return 1
-
+    
     # Set project_name to subproject name
     context['project_name'] = args.name
-
+    
     # Get template hints and set defaults for all variables
     hints = metadata.get_template_hints()
     for hint in hints:
         if hint.name not in context and hint.default_value is not None:
             context[hint.name] = hint.default_value
-
+    
     # Get template arguments and set defaults (including boolean defaults like enable_clikt)
     arguments = metadata.get_arguments()
     for arg in arguments:
         if arg.context_key and arg.context_key not in context:
             if arg.default is not None:
                 context[arg.context_key] = arg.default
-
+    
     # Interactive prompts for template variables
     if args.interactive:
         for hint in hints:
@@ -5029,7 +5029,7 @@ def handle_subproject_command(args: argparse.Namespace,
             )
             if prompted:
                 context[hint.name] = prompted
-
+    
     # Print summary
     print()
     print("=" * 70)
@@ -5039,7 +5039,7 @@ def handle_subproject_command(args: argparse.Namespace,
     print_info(f"Root project: {root_path}")
     print_info(f"Target directory: {root_path / args.name}")
     print()
-
+    
     # Create subproject
     generator = SubprojectGenerator(
         template_path=template_path,
@@ -5048,7 +5048,7 @@ def handle_subproject_command(args: argparse.Namespace,
         root_path=root_path,
         subproject_name=args.name
     )
-
+    
     if generator.generate():
         return 0
     return 1
@@ -5057,10 +5057,10 @@ def handle_subproject_command(args: argparse.Namespace,
 def handle_versions_command(args: argparse.Namespace) -> int:
     """
     Handle versions command - Check and update dependency versions.
-
+    
     Args:
         args: Parsed arguments
-
+    
     Returns:
         Exit code (0 for success)
     """
@@ -5069,22 +5069,22 @@ def handle_versions_command(args: argparse.Namespace) -> int:
     if not root_path:
         print_error("Not in a Gradle project (no settings.gradle.kts found)")
         return 1
-
+    
     toml_path = root_path / 'gradle' / 'libs.versions.toml'
     if not toml_path.exists():
         print_error(f"Version catalog not found: {toml_path}")
         return 1
-
+    
     print_info(f"Checking versions in {toml_path}")
     print()
-
+    
     # Parse TOML
     manager = VersionManager(toml_path)
-
+    
     if not manager.entries:
         print_warning("No version entries found in [versions] section")
         return 0
-
+    
     # Try to load Maven Central module
     maven_central = None
     try:
@@ -5099,13 +5099,13 @@ def handle_versions_command(args: argparse.Namespace) -> int:
                 pass
     except Exception:
         pass
-
+    
     # Get recent_hours from config (default 48)
     config = load_config(paths.config_file)
     recent_hours = config.get('versions', {}).get('maven_recent_hours', 48)
     include_recent = getattr(args, 'include_recent', False)
     results = manager.check_updates(maven_central, include_recent=include_recent, recent_hours=recent_hours)
-
+    
     # Categorize results
     updates = []
     pinned = []
@@ -5115,7 +5115,7 @@ def handle_versions_command(args: argparse.Namespace) -> int:
     too_recent = []
     unknown = []
     errors = []
-
+    
     for r in results:
         if r['status'] == 'UPDATE':
             updates.append(r)
@@ -5135,14 +5135,14 @@ def handle_versions_command(args: argparse.Namespace) -> int:
             unknown.append(r)
         else:
             errors.append(r)
-
+    
     # Display results
     max_name_len = max(len(r['name']) for r in results) if results else 10
-
+    
     for r in results:
         name = r['name'].ljust(max_name_len)
         curr = r['current']
-
+        
         if r['status'] == 'UPDATE':
             latest = r['latest']
             print(f"  [UPDATE]  {name}: {curr} -> {latest} ({r['message']})")
@@ -5165,9 +5165,9 @@ def handle_versions_command(args: argparse.Namespace) -> int:
             print(f"  [NO_API]  {name}: {curr} (Maven Central API not available)")
         else:
             print(f"  [ERROR]   {name}: {r['message']}")
-
+    
     print()
-
+    
     # Summary
     summary_parts = []
     if updates:
@@ -5184,52 +5184,52 @@ def handle_versions_command(args: argparse.Namespace) -> int:
         summary_parts.append(f"{len(violations)} constraint violations")
     if unknown:
         summary_parts.append(f"{len(unknown)} unknown constraints")
-
+    
     print(', '.join(summary_parts))
-
+    
     # Apply updates if requested
     if args.update and updates:
         print()
-
+        
         if not args.yes:
             response = input("Apply updates? [y/N] ").strip().lower()
             if response != 'y':
                 print("Aborted.")
                 return 0
-
+        
         for r in updates:
             if args.dependency and r['name'] != args.dependency:
                 continue
-
+            
             old_version = r['current']
             new_version = r['latest']
-
+            
             if manager.update_version(r['name'], new_version):
                 print_success(f"Updated {r['name']}: {old_version} -> {new_version}")
             else:
                 print_error(f"Failed to update {r['name']}")
-
+    
     elif args.update and not updates:
         print("No updates available.")
-
+    
     elif not args.check and not args.update:
         # Default: just show status (already done above)
         if updates:
             print()
             print("Run 'gradleInit versions --update' to apply updates.")
-
+    
     return 0
 
 
 def handle_keys_command(args: argparse.Namespace) -> int:
     """Handle keys command - Manage signing keys."""
     security = RepositorySecurity()
-
+    
     if args.generate:
         if not ensure_cryptography():
             print_error("Security features require 'cryptography' package")
             return 1
-
+        
         try:
             private_path, public_path = security.generate_keypair(args.generate)
             print_success(f"Generated keypair '{args.generate}'")
@@ -5245,12 +5245,12 @@ def handle_keys_command(args: argparse.Namespace) -> int:
             print_error(f"Failed to generate keypair: {e}")
             return 1
         return 0
-
+    
     if args.import_key:
         if not ensure_cryptography():
             print_error("Security features require 'cryptography' package")
             return 1
-
+        
         name, source = args.import_key
         try:
             key_path = security.import_public_key(name, source)
@@ -5263,38 +5263,38 @@ def handle_keys_command(args: argparse.Namespace) -> int:
             print_error(f"Failed to import key: {e}")
             return 1
         return 0
-
+    
     if args.export:
         key_pem = security.get_public_key(args.export)
         if key_pem is None:
             print_error(f"Key '{args.export}' not found")
             return 1
-
+        
         print(key_pem.decode('utf-8'))
         return 0
-
+    
     if args.delete:
         if args.delete == 'official':
             print_error("Cannot delete embedded official key")
             return 1
-
+        
         deleted = False
         for suffix in ['.private.pem', '.public.pem']:
             key_path = security.keys_dir / f"{args.delete}{suffix}"
             if key_path.exists():
                 key_path.unlink()
                 deleted = True
-
+        
         if deleted:
             print_success(f"Deleted key '{args.delete}'")
         else:
             print_error(f"Key '{args.delete}' not found")
             return 1
         return 0
-
+    
     # Default: list keys
     keys = security.list_keys()
-
+    
     print("Available keys:")
     print()
     for key in keys:
@@ -5304,7 +5304,7 @@ def handle_keys_command(args: argparse.Namespace) -> int:
             print(f"  official  [embedded] - Official gradleInit key")
         else:
             print(f"  {key['name']}  [{key_type}]{has_private}")
-
+    
     return 0
 
 
@@ -5313,14 +5313,14 @@ def handle_sign_command(args: argparse.Namespace) -> int:
     if not ensure_cryptography():
         print_error("Security features require 'cryptography' package")
         return 1
-
+    
     security = RepositorySecurity()
     repo_path = Path(args.repo).resolve()
-
+    
     if not repo_path.exists():
         print_error(f"Repository not found: {repo_path}")
         return 1
-
+    
     try:
         checksums_path, sig_path = security.sign_repository(repo_path, args.key)
         print_success(f"Repository signed with key '{args.key}'")
@@ -5336,7 +5336,7 @@ def handle_sign_command(args: argparse.Namespace) -> int:
     except Exception as e:
         print_error(f"Failed to sign repository: {e}")
         return 1
-
+    
     return 0
 
 
@@ -5345,17 +5345,17 @@ def handle_verify_command(args: argparse.Namespace) -> int:
     if not ensure_cryptography():
         print_error("Security features require 'cryptography' package")
         return 1
-
+    
     security = RepositorySecurity()
     repo_path = Path(args.repo).resolve()
     key_name = args.key or 'official'
-
+    
     if not repo_path.exists():
         print_error(f"Repository not found: {repo_path}")
         return 1
-
+    
     success, message = security.verify_repository(repo_path, key_name)
-
+    
     if success:
         print_success(f"Verification PASSED: {message}")
         return 0
@@ -5366,19 +5366,19 @@ def handle_verify_command(args: argparse.Namespace) -> int:
 
 def handle_modules_command(args: argparse.Namespace, paths: 'GradleInitPaths') -> int:
     """Handle modules command - Manage modules."""
-
+    
     module_loader = ModuleLoader(paths)
-
+    
     # Handle --download
     if hasattr(args, 'download') and args.download:
         success = module_loader.force_download_modules()
         return 0 if success else 1
-
+    
     # Handle --update
     if hasattr(args, 'update') and args.update:
         success = module_loader.update_modules()
         return 0 if success else 1
-
+    
     # Handle --info
     if hasattr(args, 'info') and args.info:
         info = module_loader.get_modules_info()
@@ -5401,10 +5401,10 @@ def handle_modules_command(args: argparse.Namespace, paths: 'GradleInitPaths') -
             print("Run: gradleInit modules --download")
 
         return 0
-
+    
     # Load config for repository management
     config = load_config(paths.config_file)
-
+    
     if 'module_repositories' not in config:
         config['module_repositories'] = {
             'official': {
@@ -5412,7 +5412,7 @@ def handle_modules_command(args: argparse.Namespace, paths: 'GradleInitPaths') -
                 'key': 'official'
             }
         }
-
+    
     if hasattr(args, 'list') and args.list:
         print("Module repositories:")
         print()
@@ -5425,16 +5425,16 @@ def handle_modules_command(args: argparse.Namespace, paths: 'GradleInitPaths') -
             print(f"    Trust: {trust} (key: {key})")
             print()
         return 0
-
+    
     if hasattr(args, 'add_repo') and args.add_repo:
         name, url = args.add_repo
-
+        
         if name in config.get('module_repositories', {}):
             print_error(f"Repository '{name}' already exists")
             return 1
-
+        
         repo_config = {'url': url}
-
+        
         if args.key:
             repo_config['key'] = args.key
             repo_config['trust'] = TRUST_VERIFIED
@@ -5452,30 +5452,30 @@ def handle_modules_command(args: argparse.Namespace, paths: 'GradleInitPaths') -
         else:
             print_error("Must specify --key KEYNAME or --unverified")
             return 1
-
+        
         config['module_repositories'][name] = repo_config
-
+        
         # Save config
         save_config(paths.config_file, config)
         print_success(f"Added repository '{name}'")
         return 0
-
+    
     if hasattr(args, 'remove_repo') and args.remove_repo:
         name = args.remove_repo
-
+        
         if name == 'official':
             print_error("Cannot remove official repository")
             return 1
-
+        
         if name not in config.get('module_repositories', {}):
             print_error(f"Repository '{name}' not found")
             return 1
-
+        
         del config['module_repositories'][name]
         save_config(paths.config_file, config)
         print_success(f"Removed repository '{name}'")
         return 0
-
+    
     # Default: show info
     return handle_modules_command(
         argparse.Namespace(info=True, download=False, update=False, list=False, add_repo=None, remove_repo=None, key=None, unverified=False),
@@ -5486,16 +5486,16 @@ def handle_modules_command(args: argparse.Namespace, paths: 'GradleInitPaths') -
 def save_config(config_file: Path, config: Dict[str, Any]):
     """Save configuration to TOML file."""
     config_file.parent.mkdir(parents=True, exist_ok=True)
-
+    
     lines = []
-
+    
     for section, values in config.items():
         lines.append(f"[{section}]")
         if isinstance(values, dict):
             for key, value in values.items():
                 if isinstance(value, dict):
                     # Inline table for nested dicts
-                    inner = ', '.join(f'{k} = "{v}"' if isinstance(v, str) else f'{k} = {v}'
+                    inner = ', '.join(f'{k} = "{v}"' if isinstance(v, str) else f'{k} = {v}' 
                                      for k, v in value.items())
                     lines.append(f'{key} = {{ {inner} }}')
                 elif isinstance(value, str):
@@ -5505,7 +5505,7 @@ def save_config(config_file: Path, config: Dict[str, Any]):
                 else:
                     lines.append(f'{key} = {value}')
         lines.append('')
-
+    
     config_file.write_text('\n'.join(lines), encoding='utf-8')
 
 
@@ -5515,7 +5515,7 @@ def save_config(config_file: Path, config: Dict[str, Any]):
 
 def main():
     """Main entry point"""
-
+    
     # If --version is requested, let argparse handle it (avoids double output)
     if '--version' in sys.argv or '-v' in sys.argv:
         # Argparse will handle version display and exit
