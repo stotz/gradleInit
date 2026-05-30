@@ -8,7 +8,7 @@ Architecture: Core + Optional Modules
 - Git required for templates (already a requirement)
 - Modules auto-download on demand
 
-Version: 1.0.0
+Version: 1.3.0
 Author: Urs Stotz
 License: MIT
 """
@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple, Any
 # Version & Constants
 # ============================================================================
 
-SCRIPT_VERSION = "1.0.0"
+SCRIPT_VERSION = "1.9.0"
 MODULES_REPO = "https://github.com/stotz/gradleInitModules.git"
 TEMPLATES_REPO = "https://github.com/stotz/gradleInitTemplates.git"
 MODULES_VERSION = "main"  # Use main branch
@@ -2812,6 +2812,8 @@ class DynamicCLIBuilder:
                                    help='Disable interactive mode')
         control_group.add_argument('--dry-run', action='store_true',
                                    help='Show what would be created')
+        control_group.add_argument('--latest', action='store_true',
+                                   help='Use @* (always update) instead of @pin for version constraints')
         control_group.add_argument('-h', '--help', action='store_true',
                                    help='Show help')
 
@@ -2917,6 +2919,8 @@ class DynamicCLIBuilder:
                                         help='Set configuration value (can be used multiple times)')
         subproject_parser.add_argument('--interactive', '-i', action='store_true',
                                         help='Interactive mode')
+        subproject_parser.add_argument('--latest', action='store_true',
+                                        help='Use @* (always update) instead of @pin for version constraints')
         subproject_parser.add_argument('-h', '--help', action='store_true',
                                         help='Show help (includes template-specific options)')
 
@@ -4803,6 +4807,9 @@ def handle_init_command(args: argparse.Namespace,
         )
         context = context_builder.build_context()
 
+        # Set version_policy based on --latest flag
+        context['version_policy'] = '@*' if getattr(args, 'latest', False) else '@pin'
+
         # Show context summary
         print_info("Context values:")
         important_keys = ['project_name', 'group', 'version', 'kotlin_version', 'gradle_version']
@@ -5029,6 +5036,9 @@ def handle_subproject_command(args: argparse.Namespace,
             )
             if prompted:
                 context[hint.name] = prompted
+    
+    # Set version_policy based on --latest flag
+    context['version_policy'] = '@*' if getattr(args, 'latest', False) else '@pin'
     
     # Print summary
     print()
