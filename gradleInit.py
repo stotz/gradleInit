@@ -8,7 +8,7 @@ Architecture: Core + Optional Modules
 - Git required for templates (already a requirement)
 - Modules auto-download on demand
 
-Version: 1.10.0
+Version: 1.10.1
 Author: Urs Stotz
 License: MIT
 """
@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple, Any
 # Version & Constants
 # ============================================================================
 
-SCRIPT_VERSION = "1.10.0"
+SCRIPT_VERSION = "1.10.1"
 MODULES_REPO = "https://github.com/stotz/gradleInitModules.git"
 TEMPLATES_REPO = "https://github.com/stotz/gradleInitTemplates.git"
 MODULES_VERSION = "main"  # Use main branch
