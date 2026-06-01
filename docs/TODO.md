@@ -1,0 +1,3 @@
+- git add gradle/wrapper/gradle-wrapper.jar
+- versions --update 
+  - auch gradle/wrapper/gradle-wrapper.properties distributionUrl=https\://services.gradle.org/distributions/gradle-9.4.1-bin.zip

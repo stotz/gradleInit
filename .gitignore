@@ -152,3 +152,15 @@ desktop.ini
 # *.crash
 # *.sublime-project
 # *.sublime-workspace
+docs/AI_*.md
+__pycache__/
+*.tar.bz2
+*.log.bz2
+*.log.gz
+dump_src.cfg
+dump_src.sh
+temp/
+test_sign.sh
+test_template_compilation.py
+test_versions.py
+extract.sh

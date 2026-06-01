@@ -1,0 +1,110 @@
+# Release workflow - triggered by version tags
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  PYTHON_VERSION: '3.13'
+
+jobs:
+  release:
+    name: Build Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install toml jinja2 requests
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Release version: $VERSION"
+
+      - name: Verify version in script
+        run: |
+          SCRIPT_VERSION=$(grep -oP 'SCRIPT_VERSION = "\K[^"]+' gradleInit.py)
+          TAG_VERSION=${{ steps.version.outputs.version }}
+          if [[ "$SCRIPT_VERSION" != "$TAG_VERSION" ]]; then
+            echo "Error: Script version ($SCRIPT_VERSION) does not match tag ($TAG_VERSION)"
+            exit 1
+          fi
+          echo "Version verified: $SCRIPT_VERSION"
+
+      - name: Run tests
+        run: |
+          python -m pytest test_gradleInit.py -v --tb=short
+
+      - name: Create release archive
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          ARCHIVE="gradleInit-v${VERSION}.tar.gz"
+          
+          # Create archive with essential files
+          tar -czvf "$ARCHIVE" \
+            --transform "s,^,gradleInit-v${VERSION}/," \
+            gradleInit.py \
+            README.md \
+            LICENSE \
+            test_gradleInit.py \
+            test_cli.py \
+            test_config_integration.py
+          
+          echo "archive=$ARCHIVE" >> $GITHUB_OUTPUT
+          echo "Created: $ARCHIVE"
+          ls -la "$ARCHIVE"
+
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          ARCHIVE="gradleInit-v${VERSION}.tar.gz"
+          
+          # Upload to existing release (created by release.sh)
+          gh release upload "v${VERSION}" "$ARCHIVE" --clobber || true
+
+      - name: Update release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          
+          # Append installation instructions to release notes
+          cat >> /tmp/notes.md << 'NOTES'
+          
+          ## Installation
+          
+          ```bash
+          # Download and extract
+          curl -L https://github.com/${{ github.repository }}/releases/download/v${VERSION}/gradleInit-v${VERSION}.tar.gz | tar xz
+          
+          # Or clone the repository
+          git clone https://github.com/${{ github.repository }}.git
+          ```
+          
+          ## Quick Start
+          
+          ```bash
+          ./gradleInit.py init myproject --template kotlin-single
+          ```
+          NOTES
+          
+          gh release edit "v${VERSION}" --notes-file /tmp/notes.md || true
