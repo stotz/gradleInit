@@ -8,7 +8,7 @@ Architecture: Core + Optional Modules
 - Git required for templates (already a requirement)
 - Modules auto-download on demand
 
-Version: 1.10.1
+Version: 1.3.0
 Author: Urs Stotz
 License: MIT
 """
@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple, Any
 # Version & Constants
 # ============================================================================
 
-SCRIPT_VERSION = "1.10.1"
+SCRIPT_VERSION = "1.9.0"
 MODULES_REPO = "https://github.com/stotz/gradleInitModules.git"
 TEMPLATES_REPO = "https://github.com/stotz/gradleInitTemplates.git"
 MODULES_VERSION = "main"  # Use main branch
@@ -50,18 +50,18 @@ GRADLE_VERSIONS_URL = "https://services.gradle.org/versions/all"
 # Security: Official public key for signed repositories
 # This key is used to verify official gradleInit templates and modules
 OFFICIAL_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
-MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAlt9SOWupfyitlHl+IEn2
-nNJCo5PrsY9WMRYT2VnTQ3lG7zgUflH/F5QlLx8mdQQvzwv2CG71F+jw6ic8O/oi
-s6xfu12FR/XT+SWMAl/VVvd/j/sSML3vI9z6wRiYBjUu6KI5ea+bIv02OUIyGjwn
-kCbTV8nRLyouyQxlH8YoYPqATU9eWIfyoUyGW8SwSDu3k5ODokWbR2FhPQFjOLLL
-miFGwLlvNjv89/L0i/owLi8gvguXgayGPVCv/pRi+wRFptPIuGLxl0679bbKXZE6
-D3isXDP3kXVjtXaJqTXzlOOojAitEJs+SsLfYjPHhNYHS7SfsTyZXNNcumGPUEKn
-YtZ+UE9spuXTiGviX5qNm8OM8+9s5iahD9LGF/JE6BTj1he1dYTiaXwvA02SNiMr
-FvPbnBmEIIyAIJGG3AX9qNiUQ5r3CQ//YL+zU+YvP8YMoluoweYkhiYHFLPHwfpY
-rruNXZpQ/7BJstSSvf5qyKGAVzcW06dbgLWbYyZKjQDLpHo4zKcHQUSmTjcJE63W
-TSVwx1gJTpVRwRH0IFhv6P4mZKDNHYqi553HYq1kYa+putLmqxXaGu6cWdvXrnQN
-noJzxXwi/4/iZL+f93IE5/agW31QWtHTa83yWwCOOYSeGEUTlOXxpow49zuEKjiS
-0BT5KcR1e6la8REY7FO8ErkCAwEAAQ==
+MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAyYmNo5C/Dv50rEuYR0n8
+/uqlrYmyuKzQcdYYYth2URyzlUNQd0GFYLlGYtrV+GL8CosB/V3cze4zwz1sB/h+
+uUr2tBZmrY0uWoOVUkQqhU52RBD8xpNsTWnwhdBVXD/OsTCuVncPKxCEn2UxkWpi
+w7Opu2LJqtGmhLBJ8S2ASD6hFS5MllUb4Wm5Ks3U7XNaCSb2qyrvJ7gNrVDGtq4j
+5k5CaG+YDeMZVM5rXgyZO6mjuH09j+XrcMsyOmdqv3RlvMmHJr1q/qKohLndQZ8K
+CNfgeOpUhv+bM3gPZVG6RvNgcefRchJ2ba+abfGhZgwk10qN4dOnbesdOAPkffLY
+zAq/I3TxBiuPkEdwbGpEEdqlE+3p05swNzLZbzKHV+8egJB2EFwiq9m1m7EXj1n7
+9HWfJEVphjN4XOxxLXLXme7HncQMCgN0egsu6PDD0yeUgPxsECjJNCRoSA0AJ4+e
+tPpyKhpAw5YqoGVm6o7ntx9h90i+rzDRmtgrQ5g9wxADkvII5TFoXAfDEX0EvxHK
+HWGqSL6GT43K9RGF6ecy+PXWW+dty77z681Lx9bWK5HxqCkoC+9F3cZI+cwpIqWo
+Asg2ENBVvvr+7B4TOQ+m+Q6DdPpx2MvMwPy8vm5xRm4mJ5/ftgqnZBpCsma/zeXS
+iANsmikbjFw5rrY2yFiVdK0CAwEAAQ==
 -----END PUBLIC KEY-----"""
 
 # Trust levels
