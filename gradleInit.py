@@ -8,7 +8,7 @@ Architecture: Core + Optional Modules
 - Git required for templates (already a requirement)
 - Modules auto-download on demand
 
-Version: 1.10.7
+Version: 1.10.1
 Author: Urs Stotz
 License: MIT
 """
@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple, Any
 # Version & Constants
 # ============================================================================
 
-SCRIPT_VERSION = "1.10.7"
+SCRIPT_VERSION = "1.10.1"
 MODULES_REPO = "https://github.com/stotz/gradleInitModules.git"
 TEMPLATES_REPO = "https://github.com/stotz/gradleInitTemplates.git"
 SELF_REPO = "https://github.com/stotz/gradleInit.git"
@@ -704,6 +704,30 @@ class RepositorySecurity:
 # Gradle Version Management
 # ============================================================================
 
+def _filter_gradle_versions(data: List[dict], include_rc: bool = False,
+                            include_nightly: bool = False) -> List[str]:
+    """Filter Gradle /versions/all entries by their metadata flags.
+
+    Nightly builds carry a timestamp version (e.g. 9.7.0-20260602012325+0000) that
+    does NOT contain the word 'nightly', so filtering must use the metadata fields
+    (snapshot/nightly/releaseNightly/rcFor/activeRc/milestoneFor/broken), not a
+    substring match on the version string.
+    """
+    versions = []
+    for item in data:
+        version = item.get('version', '')
+        if not version or item.get('broken'):
+            continue
+        if (item.get('snapshot') or item.get('nightly') or item.get('releaseNightly')) and not include_nightly:
+            continue
+        if (item.get('rcFor') or item.get('activeRc')) and not include_rc:
+            continue
+        if item.get('milestoneFor'):
+            continue
+        versions.append(version)
+    return versions
+
+
 def fetch_gradle_versions(include_rc: bool = False, include_nightly: bool = False) -> List[str]:
     """
     Fetch available Gradle versions from services.gradle.org
@@ -721,21 +745,7 @@ def fetch_gradle_versions(include_rc: bool = False, include_nightly: bool = Fals
         with urllib.request.urlopen(GRADLE_VERSIONS_URL, timeout=10) as response:
             data = json.loads(response.read().decode('utf-8'))
 
-        versions = []
-        for item in data:
-            version = item.get('version', '')
-            if not version:
-                continue
-
-            # Filter based on preferences
-            if 'nightly' in version.lower() and not include_nightly:
-                continue
-            if 'rc' in version.lower() and not include_rc:
-                continue
-
-            versions.append(version)
-
-        return versions
+        return _filter_gradle_versions(data, include_rc=include_rc, include_nightly=include_nightly)
 
     except Exception as e:
         print_warning(f"Could not fetch Gradle versions: {e}")
@@ -2759,7 +2769,7 @@ class DynamicCLIBuilder:
 
         # Self-update
         parser.add_argument('--update', action='store_true',
-                          help='Update gradleInit itself (git pull or signed download)')
+                          help="Update gradleInit (use '--update all' for tool + templates + modules)")
 
         # Scoop integration (only show if SCOOP env is set)
         if SCOOP_DIR:
@@ -5072,6 +5082,7 @@ def handle_subproject_command(args: argparse.Namespace,
 
 GRADLE_POLICY_RE = re.compile(r'^\s*#\s*gradle\s+@(.+?)\s*$', re.MULTILINE)
 GRADLE_DIST_RE = re.compile(r'(gradle-)(\d+(?:\.\d+){0,2}(?:-[\w.]+)?)(-(?:bin|all)\.zip)')
+GRADLE_FINAL_VERSION_RE = re.compile(r'^\d+\.\d+(?:\.\d+)?$')
 
 
 def _parse_gradle_policy(toml_text: str) -> Optional[str]:
@@ -5107,6 +5118,10 @@ def _select_gradle_target(current: str, available: List[str], policy: str) -> Op
     checker = VersionConstraintChecker
     best = None
     for version in available:
+        # Defensive: only consider final releases (ignore rc/nightly/snapshot/
+        # milestone forms that may slip through, e.g. 9.7.0-<timestamp>+0000)
+        if not GRADLE_FINAL_VERSION_RE.match(version):
+            continue
         if not checker.satisfies(version, policy):
             continue
         if checker.compare_versions(version, current) <= 0:
@@ -5801,13 +5816,56 @@ def handle_self_update(script_path: Optional[Path] = None) -> int:
     return self_update_single_file(script_path)
 
 
-def _is_self_update_request(update_flag: bool, command: Optional[str]) -> bool:
-    """The top-level --update means self-update only when no subcommand is given.
+def _self_update_target(update_flag: bool, command: Optional[str]) -> Optional[str]:
+    """Resolve what the global --update flag should do.
 
-    Subcommands (templates/modules/versions) have their own --update flag and must
-    not be hijacked by the global self-update.
+    - no subcommand        -> 'self' (update the tool only)
+    - subcommand 'all'     -> 'all'  (tool + templates + modules)
+    - any other subcommand -> None   (templates/modules/versions own their --update)
     """
-    return bool(update_flag) and command is None
+    if not update_flag:
+        return None
+    if command is None:
+        return 'self'
+    if command.lower() == 'all':
+        return 'all'
+    return None
+
+
+def handle_update_all(repo_manager: 'TemplateRepositoryManager',
+                      module_loader: 'ModuleLoader') -> int:
+    """Update gradleInit itself, the template repositories and the modules."""
+    overall = 0
+
+    print_header("Updating gradleInit")
+    if handle_self_update() != 0:
+        overall = 1
+
+    print()
+    print_header("Updating Template Repositories")
+    if repo_manager.ensure_official_templates():
+        results = repo_manager.update_all()
+        for repo_name, success in results.items():
+            if success:
+                print_success(f"{repo_name} updated")
+            else:
+                print_error(f"{repo_name} update failed")
+                overall = 1
+    else:
+        print_error("Failed to clone or locate official templates")
+        overall = 1
+
+    print()
+    print_header("Updating Modules")
+    if not module_loader.update_modules():
+        overall = 1
+
+    print()
+    if overall == 0:
+        print_success("All components updated (gradleInit, templates, modules)")
+    else:
+        print_warning("Some updates failed; see the messages above")
+    return overall
 
 
 def main():
@@ -5868,10 +5926,13 @@ def main():
 
     phase1_args, remaining = parser.parse_known_args()
 
-    # Handle self-update first (only when no subcommand is given; subcommands
-    # such as templates/modules/versions have their own --update flag)
-    if _is_self_update_request(phase1_args.update, phase1_args.command):
+    # Handle self-update first (no subcommand -> update the tool; 'all' -> update
+    # tool + templates + modules; templates/modules/versions own their own --update)
+    update_target = _self_update_target(phase1_args.update, phase1_args.command)
+    if update_target == 'self':
         return handle_self_update()
+    if update_target == 'all':
+        return handle_update_all(repo_manager, module_loader)
 
     # Handle Scoop shims commands first
     if phase1_args.scoop_shims_install:

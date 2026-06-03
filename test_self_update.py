@@ -112,21 +112,27 @@ class TestVerifySingleFile(unittest.TestCase):
         self.assertIn("No checksum entry", message)
 
 
-class TestSelfUpdateRequest(unittest.TestCase):
-    """The global --update must not hijack subcommand --update flags."""
+class TestSelfUpdateTarget(unittest.TestCase):
+    """The global --update must resolve to self/all/None correctly and never
+    hijack subcommand --update flags."""
 
-    def test_update_without_command_is_self_update(self):
-        self.assertTrue(gradleInit._is_self_update_request(True, None))
+    def test_no_command_is_self(self):
+        self.assertEqual(gradleInit._self_update_target(True, None), "self")
 
-    def test_update_with_subcommand_is_not_self_update(self):
+    def test_all_token(self):
+        self.assertEqual(gradleInit._self_update_target(True, "all"), "all")
+        self.assertEqual(gradleInit._self_update_target(True, "ALL"), "all")
+
+    def test_subcommands_not_hijacked(self):
         for command in ("templates", "modules", "versions", "init"):
-            self.assertFalse(
-                gradleInit._is_self_update_request(True, command),
-                f"--update with '{command}' must not trigger self-update",
+            self.assertIsNone(
+                gradleInit._self_update_target(True, command),
+                f"--update with '{command}' must not be a self/all update",
             )
 
     def test_no_update_flag(self):
-        self.assertFalse(gradleInit._is_self_update_request(False, None))
+        self.assertIsNone(gradleInit._self_update_target(False, None))
+        self.assertIsNone(gradleInit._self_update_target(False, "all"))
 
 
 if __name__ == "__main__":
