@@ -73,6 +73,32 @@ class TestWrapperVersion(unittest.TestCase):
         self.assertIn("gradle-9.5.1-all.zip", out)
 
 
+class TestFilterGradleVersions(unittest.TestCase):
+    DATA = [
+        {"version": "9.5.1"},
+        {"version": "9.4.1"},
+        {"version": "9.7.0-20260602012325+0000", "snapshot": True, "nightly": True},
+        {"version": "9.6.0-rc-1", "rcFor": "9.6.0", "activeRc": True},
+        {"version": "9.0-milestone-1", "milestoneFor": "9.0"},
+        {"version": "8.14"},
+        {"version": "9.9", "broken": True},
+    ]
+
+    def test_default_excludes_nonfinal_and_broken(self):
+        self.assertEqual(
+            gradleInit._filter_gradle_versions(self.DATA),
+            ["9.5.1", "9.4.1", "8.14"],
+        )
+
+    def test_include_nightly(self):
+        out = gradleInit._filter_gradle_versions(self.DATA, include_nightly=True)
+        self.assertIn("9.7.0-20260602012325+0000", out)
+
+    def test_include_rc(self):
+        out = gradleInit._filter_gradle_versions(self.DATA, include_rc=True)
+        self.assertIn("9.6.0-rc-1", out)
+
+
 class TestSelectTarget(unittest.TestCase):
     AVAILABLE = ["8.14", "9.3.1", "9.4.1", "9.5.1", "10.0.0"]
 
@@ -88,6 +114,11 @@ class TestSelectTarget(unittest.TestCase):
         self.assertEqual(
             gradleInit._select_gradle_target("9.4.1", self.AVAILABLE, "^9.0.0"), "9.5.1")
 
+    def test_bare_caret_anchors_to_current(self):
+        # '@^' has no base version; it must be anchored to the current version.
+        self.assertEqual(
+            gradleInit._select_gradle_target("9.4.1", self.AVAILABLE, "^"), "9.5.1")
+
     def test_pin_never_updates(self):
         self.assertIsNone(
             gradleInit._select_gradle_target("9.4.1", self.AVAILABLE, "pin"))
@@ -95,6 +126,32 @@ class TestSelectTarget(unittest.TestCase):
     def test_no_newer_returns_none(self):
         self.assertIsNone(
             gradleInit._select_gradle_target("10.0.0", self.AVAILABLE, "*"))
+
+    def test_ignores_nightly_and_rc(self):
+        available = ["9.4.1", "9.5.1", "9.7.0-20260602012325+0000", "9.6.0-rc-1"]
+        self.assertEqual(
+            gradleInit._select_gradle_target("9.4.1", available, "*"), "9.5.1")
+
+
+class TestConstraintAnchor(unittest.TestCase):
+    """A bare caret/tilde must be anchored to the current version (used by both
+    the library and the Gradle update paths; the SSoT uses bare '@^')."""
+
+    def setUp(self):
+        self.C = gradleInit.VersionConstraintChecker
+
+    def test_bare_caret_tilde_anchored(self):
+        self.assertEqual(self.C.anchor("^", "9.3.1"), "^9.3.1")
+        self.assertEqual(self.C.anchor("~", "9.3.1"), "~9.3.1")
+
+    def test_other_constraints_unchanged(self):
+        for c in ("*", "pin", "<10.0.0", "^9.0.0", ">=1.0"):
+            self.assertEqual(self.C.anchor(c, "9.3.1"), c)
+
+    def test_bare_caret_then_satisfies(self):
+        anchored = self.C.anchor("^", "9.3.1")
+        self.assertTrue(self.C.satisfies("9.4.2", anchored))   # minor within major
+        self.assertFalse(self.C.satisfies("10.0.0", anchored)) # next major excluded
 
 
 if __name__ == "__main__":

@@ -1537,6 +1537,19 @@ class VersionConstraintChecker:
         return 0
     
     @staticmethod
+    def anchor(constraint: Optional[str], current: str) -> Optional[str]:
+        """Anchor a bare caret/tilde to the current version.
+
+        '^' and '~' carry no base version; on their own they cannot match anything.
+        In that case the current version is the implied base (e.g. '^' -> '^9.4.1').
+        """
+        if constraint == '^':
+            return '^' + current
+        if constraint == '~':
+            return '~' + current
+        return constraint
+
+    @staticmethod
     def satisfies(version: str, constraint: str) -> bool:
         """Check if version satisfies the constraint"""
         ctype, cvalue = VersionConstraintChecker.parse_constraint(constraint)
@@ -1725,8 +1738,10 @@ class VersionManager:
                 results.append(result)
                 continue
             
-            # Exact version constraint
-            ctype, cvalue = VersionConstraintChecker.parse_constraint(entry.constraint)
+            # Anchor a bare caret/tilde (e.g. '@^', as used by the SSoT) to the
+            # current version before evaluating the constraint.
+            effective_constraint = VersionConstraintChecker.anchor(entry.constraint, entry.current_version)
+            ctype, cvalue = VersionConstraintChecker.parse_constraint(effective_constraint)
             
             if ctype == 'unknown':
                 result['status'] = 'UNKNOWN'
@@ -1779,7 +1794,7 @@ class VersionManager:
                         elif latest == entry.current_version:
                             result['status'] = 'CURRENT'
                             result['message'] = 'up to date'
-                        elif ctype == 'latest' or VersionConstraintChecker.satisfies(latest, entry.constraint):
+                        elif ctype == 'latest' or VersionConstraintChecker.satisfies(latest, effective_constraint):
                             # Check age if not include_recent
                             age_hours = result.get('age_hours')
                             if not include_recent and age_hours is not None and age_hours < recent_hours:
@@ -5115,6 +5130,8 @@ def _select_gradle_target(current: str, available: List[str], policy: str) -> Op
     """
     if policy in ('pin', ''):
         return None
+    # A bare caret/tilde (e.g. '@^') is relative to the current version.
+    constraint = VersionConstraintChecker.anchor(policy, current)
     checker = VersionConstraintChecker
     best = None
     for version in available:
@@ -5122,7 +5139,7 @@ def _select_gradle_target(current: str, available: List[str], policy: str) -> Op
         # milestone forms that may slip through, e.g. 9.7.0-<timestamp>+0000)
         if not GRADLE_FINAL_VERSION_RE.match(version):
             continue
-        if not checker.satisfies(version, policy):
+        if not checker.satisfies(version, constraint):
             continue
         if checker.compare_versions(version, current) <= 0:
             continue

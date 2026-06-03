@@ -193,5 +193,62 @@ class TestApplyRoundtrip(unittest.TestCase):
             self.assertIn('junit = "5.99.0"', cat)
 
 
+class TestUpdateMode(unittest.TestCase):
+    """version_sync --update raises only the SSoT (Gradle path is deterministic)."""
+
+    @classmethod
+    def setUpClass(cls):
+        gi_path = _HERE / "gradleInit.py"
+        spec = importlib.util.spec_from_file_location("gradleInit", str(gi_path))
+        cls.gi = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.gi)
+
+    def test_gradle_ssot_plan_picks_within_policy(self):
+        toml_text = "[versions]\n# gradle @^\nkotlin = \"2.3.10\"\n"
+        wrapper = ("distributionUrl=https\\://services.gradle.org/distributions/"
+                   "gradle-9.4.1-bin.zip\n")
+        available = ["9.4.1", "9.5.1", "10.0.0", "9.7.0-20260602012325+0000"]
+        current, target, policy = version_sync.gradle_ssot_plan(
+            self.gi, toml_text, wrapper, available)
+        self.assertEqual((current, policy), ("9.4.1", "^"))
+        self.assertEqual(target, "9.5.1")  # caret stays below the next major, no nightly
+
+    def test_gradle_ssot_plan_pin(self):
+        toml_text = "[versions]\n# gradle @pin\n"
+        wrapper = "distributionUrl=...gradle-9.4.1-bin.zip\n"
+        _, target, _ = version_sync.gradle_ssot_plan(self.gi, toml_text, wrapper, ["9.5.1"])
+        self.assertIsNone(target)
+
+    def test_gradle_ssot_plan_no_policy(self):
+        self.assertEqual(
+            version_sync.gradle_ssot_plan(self.gi, "[versions]\n", "x", ["9.5.1"]),
+            (None, None, None))
+
+    def test_run_update_writes_only_ssot_wrapper(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            vdir = root / "gradleInit" / "versions" / "gradle"
+            (vdir / "wrapper").mkdir(parents=True)
+            (vdir / "libs.versions.toml").write_text(
+                "[versions]\n# gradle @*\nkotlin = \"2.3.10\"\n", encoding="utf-8")
+            wrapper = vdir / "wrapper" / "gradle-wrapper.properties"
+            wrapper.write_text(
+                "distributionUrl=https\\://services.gradle.org/distributions/"
+                "gradle-9.4.1-bin.zip\n", encoding="utf-8")
+
+            original_fetch = self.gi.fetch_gradle_versions
+            self.gi.fetch_gradle_versions = lambda **kw: ["9.4.1", "9.5.1",
+                                                          "9.7.0-20260602012325+0000"]
+            try:
+                rc = version_sync.run_update(root, assume_yes=True, gi=self.gi,
+                                             maven_central=None)
+            finally:
+                self.gi.fetch_gradle_versions = original_fetch
+
+            self.assertEqual(rc, 0)
+            self.assertIn("gradle-9.5.1-bin.zip", wrapper.read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

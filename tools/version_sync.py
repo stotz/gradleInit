@@ -19,9 +19,11 @@ It expects gradleInit and gradleInitTemplates checked out as siblings.
 Modes:
     --check    Read-only. Report every divergence between the SSoT and the
                derived locations. Exit code 0 if consistent, 1 otherwise.
-    --update   (not implemented yet) Raise SSoT versions via the resolvers.
-    --apply    (not implemented yet) Write SSoT values into the derived
-               locations.
+    --update   Raise SSoT versions via the resolvers (Maven Central + Gradle),
+               within each entry's maintenance constraint. Writes only the SSoT;
+               run --apply afterwards to propagate. Honors the recent-hours guard
+               (--include-recent to override); --yes skips the prompt.
+    --apply    Write SSoT values into the derived locations.
 
 README annotation:
     <!-- versions:begin --> ... <!-- versions:end -->   fully generated block
@@ -425,6 +427,164 @@ def run_apply(root: Path) -> List[str]:
     return changes
 
 
+# ---------------------------------------------------------------------------
+# Update mode (raise SSoT versions via the resolvers, write only the SSoT)
+# ---------------------------------------------------------------------------
+
+def _load_gradleinit():
+    """Import the sibling gradleInit.py as a library (resolvers + helpers)."""
+    import importlib.util
+    gi_path = Path(__file__).resolve().parents[1] / "gradleInit.py"
+    if not gi_path.exists():
+        print(f"[ERROR] gradleInit.py not found at {gi_path}")
+        return None
+    spec = importlib.util.spec_from_file_location("gradleInit", str(gi_path))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_maven_central(gi):
+    """Load the Maven Central resolver from the installed modules, or None."""
+    try:
+        paths = gi.GradleInitPaths()
+        modules_dir = getattr(paths, "modules_dir", None)
+        if modules_dir and modules_dir.exists():
+            sys.path.insert(0, str(modules_dir))
+            from resolvers.maven_central import MavenCentral  # type: ignore
+            return MavenCentral()
+    except Exception:
+        pass
+    return None
+
+
+def gradle_ssot_plan(gi, toml_text: str, wrapper_text: str,
+                     available: List[str]) -> Tuple:
+    """Return (current, target, policy) for the SSoT Gradle wrapper.
+
+    target is None when the policy is absent/pin or already at the newest within
+    policy. Pure: takes texts and the available version list (no network, no IO).
+    """
+    policy = gi._parse_gradle_policy(toml_text)
+    if policy is None:
+        return (None, None, None)
+    current = gi._extract_gradle_version(wrapper_text)
+    if not current or policy in ("pin", ""):
+        return (current, None, policy)
+    target = gi._select_gradle_target(current, available, policy) if available else None
+    return (current, target, policy)
+
+
+def run_update(root: Path, include_recent: bool = False, assume_yes: bool = False,
+               gi=None, maven_central="auto") -> int:
+    """Raise the SSoT versions via the resolvers. Writes only the SSoT files.
+
+    Propagation into templates/tool/READMEs is a separate step (--apply).
+    """
+    versions_dir = root / "gradleInit" / "versions"
+    toml_path = versions_dir / "gradle" / "libs.versions.toml"
+    wrapper_path = versions_dir / "gradle" / "wrapper" / "gradle-wrapper.properties"
+    if not toml_path.exists():
+        print(f"[ERROR] SSoT catalog not found: {toml_path}")
+        return 2
+
+    if gi is None:
+        gi = _load_gradleinit()
+        if gi is None:
+            return 2
+    if maven_central == "auto":
+        maven_central = _load_maven_central(gi)
+
+    # Libraries via Maven Central (reuse the end-user resolver/constraint engine)
+    manager = gi.VersionManager(toml_path)
+    try:
+        recent_hours = gi.load_config(gi.GradleInitPaths().config_file).get(
+            "versions", {}).get("maven_recent_hours", 48)
+    except Exception:
+        recent_hours = 48
+    if maven_central is None:
+        print("[WARN] Maven Central resolver not available; only Gradle will be checked.")
+        results = []
+    else:
+        results = manager.check_updates(maven_central, include_recent=include_recent,
+                                        recent_hours=recent_hours)
+    lib_updates = [r for r in results if r.get("status") == "UPDATE"]
+    too_recent = [r for r in results if r.get("status") == "TOO_RECENT"]
+
+    # Gradle via services.gradle.org (reuse the version helpers)
+    try:
+        available = gi.fetch_gradle_versions()
+    except Exception:
+        available = []
+    wrapper_text = wrapper_path.read_text(encoding="utf-8") if wrapper_path.exists() else ""
+    gradle_current, gradle_target, gradle_policy = gradle_ssot_plan(
+        gi, toml_path.read_text(encoding="utf-8"), wrapper_text, available)
+
+    print(f"-> Raising SSoT versions in {versions_dir}")
+    name_width = max([len(r["name"]) for r in results] + [len("gradle")]) if results else len("gradle")
+    for r in results:
+        name = r["name"].ljust(name_width)
+        status = r.get("status")
+        if status == "UPDATE":
+            print(f"  [UPDATE]  {name}: {r['current']} -> {r['latest']} ({r['message']})")
+        elif status == "TOO_RECENT":
+            print(f"  [RECENT]  {name}: {r['current']} -> {r.get('latest')} ({r['message']})")
+        elif status == "CURRENT":
+            print(f"  [CURRENT] {name}: {r['current']} (up to date)")
+        elif status == "PINNED":
+            print(f"  [PINNED]  {name}: {r['current']} ({r['message']})")
+        elif status in ("SKIP", "NOT_FOUND"):
+            print(f"  [SKIP]    {name}: {r['current']} ({r['message']})")
+        elif status == "VIOLATE":
+            print(f"  [VIOLATE] {name}: {r['message']}")
+        else:
+            print(f"  [{status:7}] {name}: {r.get('message', '')}")
+    if gradle_target:
+        print(f"  [UPDATE]  {'gradle'.ljust(name_width)}: {gradle_current} -> {gradle_target} (@{gradle_policy})")
+    elif gradle_current:
+        label = "PINNED" if gradle_policy in ("pin", "", None) else "CURRENT"
+        print(f"  [{label:7}] {'gradle'.ljust(name_width)}: {gradle_current}")
+
+    print()
+    summary = []
+    if lib_updates:
+        summary.append(f"{len(lib_updates)} lib update(s)")
+    if gradle_target:
+        summary.append("1 gradle update")
+    if too_recent:
+        summary.append(f"{len(too_recent)} too recent")
+    print(", ".join(summary) if summary else "no updates within policy")
+
+    if not lib_updates and not gradle_target:
+        print("[OK] SSoT already at the latest versions within policy.")
+        return 0
+
+    if not assume_yes:
+        try:
+            response = input("Raise these SSoT versions? [y/N] ").strip().lower()
+        except EOFError:
+            response = "n"
+        if response != "y":
+            print("Aborted.")
+            return 0
+
+    for r in lib_updates:
+        if manager.update_version(r["name"], r["latest"]):
+            print(f"[OK] {r['name']}: {r['current']} -> {r['latest']}")
+        else:
+            print(f"[ERROR] failed to raise {r['name']}")
+    if gradle_target:
+        wrapper_path.write_text(
+            gi._rewrite_distribution_url(wrapper_path.read_text(encoding="utf-8"), gradle_target),
+            encoding="utf-8")
+        print(f"[OK] gradle: {gradle_current} -> {gradle_target}")
+
+    print()
+    print("[OK] SSoT raised. Run 'version_sync.py --apply' to propagate the new")
+    print("     versions into the templates, tool defaults and READMEs.")
+    return 0
+
+
 def default_root() -> Path:
     """Directory that contains both gradleInit and gradleInitTemplates."""
     return Path(__file__).resolve().parents[2]
@@ -436,19 +596,21 @@ def main(argv=None) -> int:
     mode.add_argument("--check", action="store_true",
                       help="Read-only consistency check (exit 1 on drift)")
     mode.add_argument("--update", action="store_true",
-                      help="Raise SSoT versions via resolvers (not implemented yet)")
+                      help="Raise SSoT versions via resolvers (Maven Central + Gradle)")
     mode.add_argument("--apply", action="store_true",
                       help="Write SSoT values into derived locations")
     parser.add_argument("--root", type=Path, default=None,
                         help="Directory containing gradleInit and gradleInitTemplates")
+    parser.add_argument("--include-recent", action="store_true",
+                        help="With --update: also raise versions released within the recent-hours window")
+    parser.add_argument("--yes", action="store_true",
+                        help="With --update: apply without the confirmation prompt")
     args = parser.parse_args(argv)
 
     root = args.root if args.root is not None else default_root()
 
     if args.update:
-        print("[ERROR] --update is not implemented yet.")
-        print("Available modes: --check, --apply.")
-        return 2
+        return run_update(root, include_recent=args.include_recent, assume_yes=args.yes)
 
     if args.apply:
         changes = run_apply(root)
