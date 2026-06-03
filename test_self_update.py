@@ -111,6 +111,66 @@ class TestVerifySingleFile(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("No checksum entry", message)
 
+    def test_crlf_script_still_verifies(self):
+        # Signed over LF; a CRLF download must still verify after normalization.
+        crlf_script = self.script.replace(b"\n", b"\r\n")
+        ok, message = gradleInit._verify_single_file(
+            crlf_script, self.checksums, self.signature, self.public_pem
+        )
+        self.assertTrue(ok, message)
+
+    def test_crlf_checksums_still_verifies(self):
+        # Signature is over the LF checksums; a CRLF copy must reconcile.
+        crlf_checksums = self.checksums.replace(b"\n", b"\r\n")
+        ok, message = gradleInit._verify_single_file(
+            self.script, crlf_checksums, self.signature, self.public_pem
+        )
+        self.assertTrue(ok, message)
+
+
+class TestLineEndingNormalization(unittest.TestCase):
+    """Line endings must never affect a hash or signature (text only; binary as-is)."""
+
+    def test_normalize_crlf_and_cr_to_lf(self):
+        self.assertEqual(gradleInit._normalize_text_bytes(b"a\r\nb\rc\n"), b"a\nb\nc\n")
+
+    def test_binary_with_nul_is_unchanged(self):
+        data = b"PK\x03\x04\r\n\x00payload\r\n"
+        self.assertEqual(gradleInit._normalize_text_bytes(data), data)
+
+    def test_get_file_hash_crlf_equals_lf(self):
+        sec = gradleInit.RepositorySecurity()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "lf.txt").write_bytes(b"line1\nline2\n")
+            (root / "crlf.txt").write_bytes(b"line1\r\nline2\r\n")
+            self.assertEqual(
+                sec._get_file_hash(root, "lf.txt"),
+                sec._get_file_hash(root, "crlf.txt"),
+            )
+
+    def test_sign_verify_survives_crlf_working_copy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            keys = root / "keys"
+            keys.mkdir()
+            repo = root / "repo"
+            (repo / "sub").mkdir(parents=True)
+            (repo / "a.txt").write_bytes(b"alpha\nbeta\n")
+            (repo / "sub" / "b.toml").write_bytes(b'x = "1"\n')
+
+            sec = gradleInit.RepositorySecurity(keys_dir=keys)
+            sec.generate_keypair("test")
+            sec.sign_repository(repo, "test")
+
+            # Simulate a Windows checkout: working copy and CHECKSUMS turn CRLF.
+            (repo / "a.txt").write_bytes(b"alpha\r\nbeta\r\n")
+            cks = repo / sec.CHECKSUMS_FILE
+            cks.write_bytes(cks.read_bytes().replace(b"\n", b"\r\n"))
+
+            ok, message = sec.verify_repository(repo, "test")
+            self.assertTrue(ok, message)
+
 
 class TestSelfUpdateTarget(unittest.TestCase):
     """The global --update must resolve to self/all/None correctly and never

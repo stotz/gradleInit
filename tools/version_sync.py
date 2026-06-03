@@ -92,6 +92,18 @@ WRAPPER_VERSION_RE = re.compile(r"gradle-(\d+\.\d+(?:\.\d+)?)-")
 # SSoT parsing
 # ---------------------------------------------------------------------------
 
+def _write_lf(path: Path, text: str) -> None:
+    """Write text with Unix (LF) line endings on every platform.
+
+    Path.write_text translates '\\n' to the platform newline (CRLF on Windows).
+    Because the signature hashes files as raw bytes and git normalises committed
+    files to LF, a CRLF working copy would make the released signature fail to
+    verify on a clean clone or in CI. Normalise to LF and write the exact bytes.
+    """
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    path.write_bytes(normalized.encode("utf-8"))
+
+
 def parse_ssot(versions_dir: Path) -> Tuple[Dict[str, str], List[dict]]:
     """Parse the SSoT into a flat alias->version dict plus the override list.
 
@@ -398,7 +410,7 @@ def run_apply(root: Path) -> List[str]:
                 toml_path.read_text(encoding="utf-8"), ssot, overrides, template
             )
             if toml_changes:
-                toml_path.write_text(new_text, encoding="utf-8")
+                _write_lf(toml_path, new_text)
                 changes += toml_changes
 
     gradleinit_py = gradleinit / "gradleInit.py"
@@ -407,7 +419,7 @@ def run_apply(root: Path) -> List[str]:
             gradleinit_py.read_text(encoding="utf-8"), ssot
         )
         if tool_changes:
-            gradleinit_py.write_text(new_text, encoding="utf-8")
+            _write_lf(gradleinit_py, new_text)
             changes += tool_changes
 
     readmes = [
@@ -421,7 +433,7 @@ def run_apply(root: Path) -> List[str]:
         text, span_changes = apply_readme_spans(text, ssot)
         text, block_changes = apply_readme_block(text, ssot)
         if span_changes or block_changes:
-            readme.write_text(text, encoding="utf-8")
+            _write_lf(readme, text)
             changes += span_changes + block_changes
 
     return changes
@@ -573,10 +585,14 @@ def run_update(root: Path, include_recent: bool = False, assume_yes: bool = Fals
             print(f"[OK] {r['name']}: {r['current']} -> {r['latest']}")
         else:
             print(f"[ERROR] failed to raise {r['name']}")
+    if lib_updates:
+        # VersionManager.update_version uses write_text, which emits CRLF on
+        # Windows. Re-normalise the SSoT catalog to LF so the signed gradleInit
+        # repo stays byte-consistent with git's LF-normalised commit.
+        _write_lf(toml_path, toml_path.read_text(encoding="utf-8"))
     if gradle_target:
-        wrapper_path.write_text(
-            gi._rewrite_distribution_url(wrapper_path.read_text(encoding="utf-8"), gradle_target),
-            encoding="utf-8")
+        _write_lf(wrapper_path,
+                  gi._rewrite_distribution_url(wrapper_path.read_text(encoding="utf-8"), gradle_target))
         print(f"[OK] gradle: {gradle_current} -> {gradle_target}")
 
     print()

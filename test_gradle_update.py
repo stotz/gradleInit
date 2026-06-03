@@ -154,5 +154,21 @@ class TestConstraintAnchor(unittest.TestCase):
         self.assertFalse(self.C.satisfies("10.0.0", anchored)) # next major excluded
 
 
+class TestIsStable(unittest.TestCase):
+    """Pre-release versions must be rejected for stable maintenance bumps."""
+
+    def setUp(self):
+        self.C = gradleInit.VersionConstraintChecker
+
+    def test_stable_versions(self):
+        for v in ("9.4.2", "1.5.34", "25.0.3", "5.14.4", "2024.0.1", "1.2.3.RELEASE", "1.2.3.Final"):
+            self.assertTrue(self.C.is_stable(v), v)
+
+    def test_prerelease_versions(self):
+        for v in ("4.1.0-M4", "7.0.0-RC1", "1.0-beta", "2.0.0-alpha1", "3.0-SNAPSHOT",
+                  "9.7.0-milestone-1"):
+            self.assertFalse(self.C.is_stable(v), v)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

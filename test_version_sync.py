@@ -248,6 +248,58 @@ class TestUpdateMode(unittest.TestCase):
 
             self.assertEqual(rc, 0)
             self.assertIn("gradle-9.5.1-bin.zip", wrapper.read_text(encoding="utf-8"))
+            self.assertNotIn(b"\r", wrapper.read_bytes())  # LF only, never CRLF
+
+    def test_run_update_ssot_toml_is_lf(self):
+        import tempfile
+
+        class FakeMaven:
+            def get_versions(self, g, a, limit=1, include_prerelease=False):
+                return ["1.1.0"]
+            def get_matching_version(self, g, a, ctype, cvalue, current):
+                return "1.1.0"
+            def get_version_info(self, g, a):
+                return {"version": "1.1.0", "age_hours": 1000}
+            def get_latest_version(self, g, a):
+                return "1.1.0"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            vdir = root / "gradleInit" / "versions" / "gradle"
+            (vdir / "wrapper").mkdir(parents=True)
+            toml = vdir / "libs.versions.toml"
+            toml.write_text(
+                "[versions]\n# gradle @*\n"
+                "# https://mvnrepository.com/artifact/io.mockk/mockk @^\n"
+                'mockk = "1.0.0"\n\n'
+                "[libraries]\n"
+                'mockk = { module = "io.mockk:mockk", version.ref = "mockk" }\n',
+                encoding="utf-8")
+            wrapper = vdir / "wrapper" / "gradle-wrapper.properties"
+            wrapper.write_text("distributionUrl=...gradle-9.4.1-bin.zip\n", encoding="utf-8")
+
+            original_fetch = self.gi.fetch_gradle_versions
+            self.gi.fetch_gradle_versions = lambda **kw: ["9.4.1"]
+            try:
+                rc = version_sync.run_update(root, assume_yes=True, gi=self.gi,
+                                             maven_central=FakeMaven())
+            finally:
+                self.gi.fetch_gradle_versions = original_fetch
+
+            self.assertEqual(rc, 0)
+            self.assertIn('mockk = "1.1.0"', toml.read_text(encoding="utf-8"))
+            self.assertNotIn(b"\r", toml.read_bytes())  # SSoT catalog stays LF
+
+
+class TestWriteLf(unittest.TestCase):
+    """version_sync must write LF on every platform (signature hashes raw bytes)."""
+
+    def test_normalizes_crlf_to_lf(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "f.txt"
+            version_sync._write_lf(p, "a\r\nb\r\nc\n")
+            self.assertEqual(p.read_bytes(), b"a\nb\nc\n")
 
 
 if __name__ == "__main__":
