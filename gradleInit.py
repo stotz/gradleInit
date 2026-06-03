@@ -34,6 +34,8 @@ from typing import Dict, List, Optional, Tuple, Any
 SCRIPT_VERSION = "1.10.1"
 MODULES_REPO = "https://github.com/stotz/gradleInitModules.git"
 TEMPLATES_REPO = "https://github.com/stotz/gradleInitTemplates.git"
+SELF_REPO = "https://github.com/stotz/gradleInit.git"
+SELF_REPO_SLUG = "stotz/gradleInit"  # owner/name for the GitHub API and raw URLs
 MODULES_VERSION = "main"  # Use main branch
 
 # Platform detection
@@ -2754,6 +2756,10 @@ class DynamicCLIBuilder:
         # Package management for CI
         parser.add_argument('--install-deps', action='store_true',
                           help='Auto-install missing Python packages (for CI)')
+
+        # Self-update
+        parser.add_argument('--update', action='store_true',
+                          help='Update gradleInit itself (git pull or signed download)')
 
         # Scoop integration (only show if SCOOP env is set)
         if SCOOP_DIR:
@@ -5523,6 +5529,181 @@ def save_config(config_file: Path, config: Dict[str, Any]):
 # CLI Entry Point
 # ============================================================================
 
+# ============================================================================
+# Self-update (gradleInit --update)
+# ============================================================================
+
+SEMVER_TAG_RE = re.compile(r'^v(\d+)\.(\d+)\.(\d+)$')
+
+
+def detect_install_type(script_path: Path) -> str:
+    """Return 'git' if the script lives in a git working tree, else 'single-file'."""
+    script_dir = script_path.resolve().parent
+    try:
+        result = subprocess.run(
+            ['git', '-C', str(script_dir), 'rev-parse', '--is-inside-work-tree'],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0 and result.stdout.strip() == 'true':
+            return 'git'
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return 'single-file'
+
+
+def _select_latest_tag(tag_names: List[str]) -> Optional[str]:
+    """Return the highest semantic-version tag (vX.Y.Z) from the list."""
+    best = None
+    best_key = None
+    for name in tag_names:
+        match = SEMVER_TAG_RE.match(name.strip())
+        if not match:
+            continue
+        key = tuple(int(group) for group in match.groups())
+        if best_key is None or key > best_key:
+            best_key, best = key, name.strip()
+    return best
+
+
+def _verify_single_file(script_bytes: bytes, checksums_bytes: bytes,
+                        signature: bytes, public_key_pem: bytes,
+                        script_name: str = "gradleInit.py") -> Tuple[bool, str]:
+    """Verify a downloaded gradleInit.py against signed CHECKSUMS.
+
+    The signature must validate over the raw CHECKSUMS bytes, and the script's
+    SHA-256 must match its entry in CHECKSUMS. The signature is checked over the
+    exact downloaded bytes (no re-encoding, to keep line endings intact).
+    """
+    try:
+        public_key = serialization.load_pem_public_key(public_key_pem)
+    except Exception as exc:
+        return False, f"Invalid public key: {exc}"
+
+    try:
+        public_key.verify(
+            signature,
+            checksums_bytes,
+            padding.PKCS1v15(),
+            hashes.SHA256(),
+        )
+    except Exception:
+        return False, "Signature verification FAILED - aborting self-update"
+
+    expected = None
+    for line in checksums_bytes.decode('utf-8').splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        parts = line.split(None, 1)
+        if len(parts) == 2 and Path(parts[1].strip()).as_posix().endswith(script_name):
+            expected = parts[0].strip()
+            break
+    if expected is None:
+        return False, f"No checksum entry for {script_name}"
+
+    actual = hashlib.sha256(script_bytes).hexdigest()
+    if actual != expected:
+        return False, "Downloaded gradleInit.py does not match the signed checksum"
+
+    return True, "Signature and checksum verified"
+
+
+def _http_get(url: str, timeout: int = 30) -> bytes:
+    """Fetch raw bytes from a URL."""
+    import urllib.request
+    request = urllib.request.Request(url, headers={'User-Agent': 'gradleInit'})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read()
+
+
+def _fetch_tags(slug: str) -> List[str]:
+    """Fetch tag names for a repository via the GitHub API."""
+    data = json.loads(_http_get(f"https://api.github.com/repos/{slug}/tags?per_page=100").decode('utf-8'))
+    return [item.get('name', '') for item in data]
+
+
+def self_update_git(script_path: Path) -> int:
+    """Update a git-based install via fast-forward pull."""
+    repo_dir = script_path.resolve().parent
+    try:
+        top = subprocess.run(
+            ['git', '-C', str(repo_dir), 'rev-parse', '--show-toplevel'],
+            capture_output=True, text=True
+        )
+        repo_root = Path(top.stdout.strip()) if top.returncode == 0 else repo_dir
+    except (OSError, subprocess.SubprocessError):
+        repo_root = repo_dir
+
+    print(f"-> Git install detected; pulling latest in {repo_root}")
+    result = subprocess.run(
+        ['git', '-C', str(repo_root), 'pull', '--ff-only'],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        print("[ERROR] 'git pull --ff-only' failed:")
+        print((result.stderr or result.stdout).strip())
+        print("-> Resolve local changes or divergence manually, then retry.")
+        return 1
+    print(result.stdout.strip())
+    print("[OK] Repository updated.")
+    return 0
+
+
+def self_update_single_file(script_path: Path) -> int:
+    """Update a single-file install by downloading the latest signed release tag."""
+    print("-> Single-file install detected; updating from the latest release tag")
+    try:
+        tags = _fetch_tags(SELF_REPO_SLUG)
+    except Exception as exc:
+        print(f"[ERROR] Could not fetch tags from GitHub: {exc}")
+        return 1
+
+    tag = _select_latest_tag(tags)
+    if not tag:
+        print("[ERROR] No release tag (vX.Y.Z) found")
+        return 1
+    print(f"-> Latest release tag: {tag}")
+
+    raw = f"https://raw.githubusercontent.com/{SELF_REPO_SLUG}/{tag}"
+    try:
+        script_bytes = _http_get(f"{raw}/gradleInit.py")
+        checksums_bytes = _http_get(f"{raw}/CHECKSUMS.sha256")
+        signature = _http_get(f"{raw}/CHECKSUMS.sig")
+    except Exception as exc:
+        print(f"[ERROR] Download failed: {exc}")
+        return 1
+
+    public_key_pem = OFFICIAL_PUBLIC_KEY.encode('utf-8')
+    ok, message = _verify_single_file(script_bytes, checksums_bytes, signature, public_key_pem)
+    if not ok:
+        print(f"[ERROR] {message}")
+        return 1
+    print(f"-> {message}")
+
+    target = script_path.resolve()
+    backup = target.with_name(target.name + '.bak')
+    tmp = target.with_name(target.name + '.new')
+    try:
+        tmp.write_bytes(script_bytes)
+        shutil.copymode(target, tmp)
+        shutil.copy2(target, backup)
+        os.replace(tmp, target)
+    except Exception as exc:
+        print(f"[ERROR] Could not replace {target}: {exc}")
+        return 1
+    print(f"[OK] Updated to {tag}. Previous version backed up as {backup.name}")
+    return 0
+
+
+def handle_self_update(script_path: Optional[Path] = None) -> int:
+    """Dispatch self-update based on the detected installation type."""
+    if script_path is None:
+        script_path = Path(__file__)
+    if detect_install_type(script_path) == 'git':
+        return self_update_git(script_path)
+    return self_update_single_file(script_path)
+
+
 def main():
     """Main entry point"""
     
@@ -5574,11 +5755,16 @@ def main():
     parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     parser.add_argument('--scoop-shims-install', action='store_true')
     parser.add_argument('--scoop-shims-uninstall', action='store_true')
+    parser.add_argument('--update', action='store_true')
     parser.add_argument('--no-interactive', action='store_true')
     parser.add_argument('command', nargs='?')
     parser.add_argument('--template')
 
     phase1_args, remaining = parser.parse_known_args()
+
+    # Handle self-update first
+    if phase1_args.update:
+        return handle_self_update()
 
     # Handle Scoop shims commands first
     if phase1_args.scoop_shims_install:
