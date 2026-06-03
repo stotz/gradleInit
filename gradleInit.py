@@ -8,7 +8,7 @@ Architecture: Core + Optional Modules
 - Git required for templates (already a requirement)
 - Modules auto-download on demand
 
-Version: 1.10.5
+Version: 1.10.1
 Author: Urs Stotz
 License: MIT
 """
@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple, Any
 # Version & Constants
 # ============================================================================
 
-SCRIPT_VERSION = "1.10.5"
+SCRIPT_VERSION = "1.10.1"
 MODULES_REPO = "https://github.com/stotz/gradleInitModules.git"
 TEMPLATES_REPO = "https://github.com/stotz/gradleInitTemplates.git"
 SELF_REPO = "https://github.com/stotz/gradleInit.git"
@@ -5704,6 +5704,15 @@ def handle_self_update(script_path: Optional[Path] = None) -> int:
     return self_update_single_file(script_path)
 
 
+def _is_self_update_request(update_flag: bool, command: Optional[str]) -> bool:
+    """The top-level --update means self-update only when no subcommand is given.
+
+    Subcommands (templates/modules/versions) have their own --update flag and must
+    not be hijacked by the global self-update.
+    """
+    return bool(update_flag) and command is None
+
+
 def main():
     """Main entry point"""
     
@@ -5762,8 +5771,9 @@ def main():
 
     phase1_args, remaining = parser.parse_known_args()
 
-    # Handle self-update first
-    if phase1_args.update:
+    # Handle self-update first (only when no subcommand is given; subcommands
+    # such as templates/modules/versions have their own --update flag)
+    if _is_self_update_request(phase1_args.update, phase1_args.command):
         return handle_self_update()
 
     # Handle Scoop shims commands first

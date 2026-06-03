@@ -112,5 +112,22 @@ class TestVerifySingleFile(unittest.TestCase):
         self.assertIn("No checksum entry", message)
 
 
+class TestSelfUpdateRequest(unittest.TestCase):
+    """The global --update must not hijack subcommand --update flags."""
+
+    def test_update_without_command_is_self_update(self):
+        self.assertTrue(gradleInit._is_self_update_request(True, None))
+
+    def test_update_with_subcommand_is_not_self_update(self):
+        for command in ("templates", "modules", "versions", "init"):
+            self.assertFalse(
+                gradleInit._is_self_update_request(True, command),
+                f"--update with '{command}' must not trigger self-update",
+            )
+
+    def test_no_update_flag(self):
+        self.assertFalse(gradleInit._is_self_update_request(False, None))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

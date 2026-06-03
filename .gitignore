@@ -164,4 +164,3 @@ test_sign.sh
 test_template_compilation.py
 test_versions.py
 extract.sh
-/.env
