@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""
+Tests for the self-update logic (gradleInit --update).
+
+Specification:
+- detect_install_type returns 'git' inside a git working tree, else 'single-file'.
+- _select_latest_tag returns the highest vX.Y.Z tag and ignores non-semver names.
+- _verify_single_file accepts a download only when the signature validates over the
+  CHECKSUMS bytes AND the script hash matches its CHECKSUMS entry; otherwise it
+  rejects (no --force escape hatch exists).
+
+The network download, git pull and self-replace are thin wrappers verified by CI.
+
+Usage:
+    python test_self_update.py
+    python -m pytest test_self_update.py -v
+"""
+
+import hashlib
+import importlib.util
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+_HERE = Path(__file__).parent
+sys.path.insert(0, str(_HERE))
+_SPEC = importlib.util.spec_from_file_location("gradleInit", str(_HERE / "gradleInit.py"))
+gradleInit = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(gradleInit)
+
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+
+
+def _make_keypair():
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_pem = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    return private_key, public_pem
+
+
+def _sign(private_key, data: bytes) -> bytes:
+    return private_key.sign(data, padding.PKCS1v15(), hashes.SHA256())
+
+
+class TestSelectLatestTag(unittest.TestCase):
+    def test_picks_highest_semver(self):
+        tags = ["v1.2.0", "v1.10.3", "v1.10.1", "main", "v0.9.9", "v1.9.20"]
+        self.assertEqual(gradleInit._select_latest_tag(tags), "v1.10.3")
+
+    def test_ignores_non_semver(self):
+        self.assertIsNone(gradleInit._select_latest_tag(["main", "latest", "v1.2"]))
+
+
+class TestDetectInstallType(unittest.TestCase):
+    def test_git_working_tree(self):
+        if shutil.which("git") is None:
+            self.skipTest("git not available")
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            script = repo / "gradleInit.py"
+            script.write_text("# dummy\n", encoding="utf-8")
+            self.assertEqual(gradleInit.detect_install_type(script), "git")
+
+    def test_single_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "gradleInit.py"
+            script.write_text("# dummy\n", encoding="utf-8")
+            self.assertEqual(gradleInit.detect_install_type(script), "single-file")
+
+
+class TestVerifySingleFile(unittest.TestCase):
+    def setUp(self):
+        self.private_key, self.public_pem = _make_keypair()
+        self.script = b"print('hello gradleInit')\n"
+        digest = hashlib.sha256(self.script).hexdigest()
+        self.checksums = (f"{digest}  gradleInit.py\n"
+                          f"{'0' * 64}  README.md\n").encode("utf-8")
+        self.signature = _sign(self.private_key, self.checksums)
+
+    def test_valid(self):
+        ok, message = gradleInit._verify_single_file(
+            self.script, self.checksums, self.signature, self.public_pem
+        )
+        self.assertTrue(ok, message)
+
+    def test_bad_signature(self):
+        ok, _ = gradleInit._verify_single_file(
+            self.script, self.checksums, b"tampered" + self.signature, self.public_pem
+        )
+        self.assertFalse(ok)
+
+    def test_tampered_script(self):
+        ok, _ = gradleInit._verify_single_file(
+            self.script + b"# evil\n", self.checksums, self.signature, self.public_pem
+        )
+        self.assertFalse(ok)
+
+    def test_checksums_without_script_entry(self):
+        checksums = (f"{'0' * 64}  README.md\n").encode("utf-8")
+        signature = _sign(self.private_key, checksums)
+        ok, message = gradleInit._verify_single_file(
+            self.script, checksums, signature, self.public_pem
+        )
+        self.assertFalse(ok)
+        self.assertIn("No checksum entry", message)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
