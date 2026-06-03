@@ -15,7 +15,7 @@
 # Gradle is resolved via services.gradle.org, not Maven Central. Its version
 # lives in gradle/wrapper/gradle-wrapper.properties; its maintenance policy is
 # the meta entry on the next line.
-# gradle services.gradle.org @^
+# gradle @^
 
 [versions]
 # https://mvnrepository.com/artifact/org.jetbrains.kotlin/kotlin-stdlib @^

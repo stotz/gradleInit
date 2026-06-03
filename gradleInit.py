@@ -8,7 +8,7 @@ Architecture: Core + Optional Modules
 - Git required for templates (already a requirement)
 - Modules auto-download on demand
 
-Version: 1.10.6
+Version: 1.10.1
 Author: Urs Stotz
 License: MIT
 """
@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple, Any
 # Version & Constants
 # ============================================================================
 
-SCRIPT_VERSION = "1.10.6"
+SCRIPT_VERSION = "1.10.1"
 MODULES_REPO = "https://github.com/stotz/gradleInitModules.git"
 TEMPLATES_REPO = "https://github.com/stotz/gradleInitTemplates.git"
 SELF_REPO = "https://github.com/stotz/gradleInit.git"
@@ -5070,6 +5070,52 @@ def handle_subproject_command(args: argparse.Namespace,
     return 1
 
 
+GRADLE_POLICY_RE = re.compile(r'^\s*#\s*gradle\s+@(.+?)\s*$', re.MULTILINE)
+GRADLE_DIST_RE = re.compile(r'(gradle-)(\d+(?:\.\d+){0,2}(?:-[\w.]+)?)(-(?:bin|all)\.zip)')
+
+
+def _parse_gradle_policy(toml_text: str) -> Optional[str]:
+    """Return the Gradle version policy from a '# gradle = @<policy>' comment.
+
+    Returns the constraint without the leading '@' (e.g. 'pin', '*', '<10.0.0'),
+    or None if no such comment exists.
+    """
+    match = GRADLE_POLICY_RE.search(toml_text)
+    if not match:
+        return None
+    return match.group(1).strip()
+
+
+def _extract_gradle_version(props_text: str) -> Optional[str]:
+    """Return the Gradle version from a gradle-wrapper.properties distributionUrl."""
+    match = GRADLE_DIST_RE.search(props_text)
+    return match.group(2) if match else None
+
+
+def _rewrite_distribution_url(props_text: str, new_version: str) -> str:
+    """Rewrite only the version inside the distributionUrl, leaving the rest intact."""
+    return GRADLE_DIST_RE.sub(lambda m: f"{m.group(1)}{new_version}{m.group(3)}", props_text)
+
+
+def _select_gradle_target(current: str, available: List[str], policy: str) -> Optional[str]:
+    """Pick the highest available version that satisfies the policy and beats current.
+
+    Returns None for the 'pin' policy or when no newer satisfying version exists.
+    """
+    if policy in ('pin', ''):
+        return None
+    checker = VersionConstraintChecker
+    best = None
+    for version in available:
+        if not checker.satisfies(version, policy):
+            continue
+        if checker.compare_versions(version, current) <= 0:
+            continue
+        if best is None or checker.compare_versions(version, best) > 0:
+            best = version
+    return best
+
+
 def handle_versions_command(args: argparse.Namespace) -> int:
     """
     Handle versions command - Check and update dependency versions.
@@ -5152,6 +5198,34 @@ def handle_versions_command(args: argparse.Namespace) -> int:
         else:
             errors.append(r)
     
+    # Gradle wrapper version (separate from the TOML; policy from a '# gradle = @...'
+    # comment, value lives in gradle/wrapper/gradle-wrapper.properties)
+    gradle_result = None
+    gradle_props = root_path / 'gradle' / 'wrapper' / 'gradle-wrapper.properties'
+    gradle_policy = _parse_gradle_policy(toml_path.read_text(encoding='utf-8'))
+    if gradle_policy is not None and gradle_props.exists():
+        gradle_current = _extract_gradle_version(gradle_props.read_text(encoding='utf-8'))
+        if gradle_current:
+            if gradle_policy in ('pin', ''):
+                gradle_result = {'name': 'gradle', 'current': gradle_current,
+                                 'status': 'PINNED', 'message': '@pin'}
+            else:
+                try:
+                    available = fetch_gradle_versions()
+                except Exception:
+                    available = []
+                target = _select_gradle_target(gradle_current, available, gradle_policy) if available else None
+                if target:
+                    gradle_result = {'name': 'gradle', 'current': gradle_current,
+                                     'latest': target, 'status': 'UPDATE', 'message': '@' + gradle_policy}
+                else:
+                    gradle_result = {'name': 'gradle', 'current': gradle_current,
+                                     'status': 'CURRENT', 'message': 'up to date'}
+    gradle_update = None
+    if gradle_result and gradle_result['status'] == 'UPDATE':
+        if not args.dependency or args.dependency == 'gradle':
+            gradle_update = gradle_result
+    
     # Display results
     max_name_len = max(len(r['name']) for r in results) if results else 10
     
@@ -5182,6 +5256,16 @@ def handle_versions_command(args: argparse.Namespace) -> int:
         else:
             print(f"  [ERROR]   {name}: {r['message']}")
     
+    if gradle_result:
+        gname = gradle_result['name'].ljust(max(max_name_len, len('gradle')))
+        gcur = gradle_result['current']
+        if gradle_result['status'] == 'UPDATE':
+            print(f"  [UPDATE]  {gname}: {gcur} -> {gradle_result['latest']} ({gradle_result['message']})")
+        elif gradle_result['status'] == 'PINNED':
+            print(f"  [PINNED]  {gname}: {gcur} ({gradle_result['message']})")
+        else:
+            print(f"  [CURRENT] {gname}: {gcur} (up to date)")
+    
     print()
     
     # Summary
@@ -5201,10 +5285,13 @@ def handle_versions_command(args: argparse.Namespace) -> int:
     if unknown:
         summary_parts.append(f"{len(unknown)} unknown constraints")
     
+    if gradle_update:
+        summary_parts.append("1 gradle update")
+    
     print(', '.join(summary_parts))
     
     # Apply updates if requested
-    if args.update and updates:
+    if args.update and (updates or gradle_update):
         print()
         
         if not args.yes:
@@ -5224,8 +5311,18 @@ def handle_versions_command(args: argparse.Namespace) -> int:
                 print_success(f"Updated {r['name']}: {old_version} -> {new_version}")
             else:
                 print_error(f"Failed to update {r['name']}")
+        
+        if gradle_update:
+            new_version = gradle_update['latest']
+            try:
+                props_text = gradle_props.read_text(encoding='utf-8')
+                gradle_props.write_text(
+                    _rewrite_distribution_url(props_text, new_version), encoding='utf-8')
+                print_success(f"Updated gradle: {gradle_update['current']} -> {new_version}")
+            except Exception as e:
+                print_error(f"Failed to update gradle: {e}")
     
-    elif args.update and not updates:
+    elif args.update and not (updates or gradle_update):
         print("No updates available.")
     
     elif not args.check and not args.update:
