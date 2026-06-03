@@ -1,0 +1,62 @@
+# gradleInit version SSoT (single source of truth).
+#
+# This file is maintenance input only. It is never shipped into a generated
+# project. version_sync.py reads it to keep the template version catalogs, the
+# tool defaults (kotlin_version, DEFAULT_GRADLE_VERSION) and the READMEs in sync.
+#
+# Maintenance constraints (npm/semver syntax) control how far "version_sync
+# --update" may raise each entry:
+#   @pin  = never        @*      = latest
+#   @^x.y.z = minor       @~x.y.z = patch
+#
+# NOTE: the per-library maintenance policy below defaults to @^ and is still
+# pending confirmation. It is not consumed yet (only --check is implemented).
+#
+# Gradle is resolved via services.gradle.org, not Maven Central. Its version
+# lives in gradle/wrapper/gradle-wrapper.properties; its maintenance policy is
+# the meta entry on the next line.
+# gradle services.gradle.org @^
+
+[versions]
+# https://mvnrepository.com/artifact/org.jetbrains.kotlin/kotlin-stdlib @^
+kotlin = "2.3.10"
+# https://mvnrepository.com/artifact/com.gradleup.shadow/shadow-gradle-plugin @^
+shadow = "9.3.1"
+# https://mvnrepository.com/artifact/com.github.ajalt.clikt/clikt @^
+clikt = "5.1.0"
+# https://mvnrepository.com/artifact/io.ktor/ktor-server-core-jvm @^
+ktor = "3.4.0"
+# https://mvnrepository.com/artifact/ch.qos.logback/logback-classic @^
+logback = "1.5.29"
+# https://mvnrepository.com/artifact/org.springframework.boot/spring-boot @^
+spring-boot = "4.0.2"
+# https://mvnrepository.com/artifact/io.spring.gradle/dependency-management-plugin @^
+spring-dependency-management = "1.1.7"
+# https://mvnrepository.com/artifact/org.beryx.jlink/org.beryx.jlink.gradle.plugin @^
+beryx_jlink = "3.1.3"
+# https://mvnrepository.com/artifact/org.openjfx/javafx-base @^
+javafx = "25.0.1"
+# https://mvnrepository.com/artifact/org.kordamp.ikonli/ikonli-javafx @^
+ikonli = "12.4.0"
+# https://mvnrepository.com/artifact/com.dlsc.formsfx/formsfx-core @^
+formsfx = "11.6.0"
+# https://mvnrepository.com/artifact/org.controlsfx/controlsfx @^
+controlsfx = "11.2.2"
+# https://mvnrepository.com/artifact/net.synedra/validatorfx @^
+validatorfx = "0.6.3"
+# https://mvnrepository.com/artifact/org.junit.jupiter/junit-jupiter-api @^
+junit = "5.13.4"
+# https://mvnrepository.com/artifact/org.assertj/assertj-core @^
+assertj = "3.27.3"
+# https://mvnrepository.com/artifact/io.mockk/mockk @^
+mockk = "1.14.9"
+
+# Deviations from the central version. Each entry must state a reason.
+# version_sync uses these to allow a single template to keep a different
+# version of a shared library. Example:
+#
+# [[gradleInit.override]]
+# template = "ktor"
+# library  = "logback"
+# version  = "1.4.14"
+# reason   = "ktor 3.x runtime incompatibility with logback 1.5.x"
