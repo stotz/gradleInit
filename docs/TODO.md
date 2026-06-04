@@ -12,12 +12,12 @@
 
 
 
-## Aktueller Stand (v0045)
+## Aktueller Stand (v0046)
 
 gradleInit ist ein Python-basiertes Tool zur Generierung von Kotlin/Gradle-Projekten aus Templates.
 Verwendet Jinja2 fuer Template-Verarbeitung mit inline Hint-System.
 SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.1; die 4-stellige AI-Versionierung
-ist davon getrennt und laeuft linear (zuletzt v0045).
+ist davon getrennt und laeuft linear (zuletzt v0046).
 
 Hinweis zur History: Die Versionstabelle unten ist zwischen v0023 und v0024 unvollstaendig.
 Einige Features (erweiterte Hint-Syntax mit Regex, Template-Compilation-Cache) sind im Code
@@ -38,6 +38,25 @@ Hauptfeatures:
 - --latest Flag fuer @* statt @pin Version-Constraints
 
 ## Aktuelle Arbeit
+
+v0046: Hint-Scanner liest jetzt gradle/libs.versions.toml
+
+- Wurzelgrund aus v0044: der reiche jdk-Hint (Default 25, Regex (24|25)) steht in
+  gradle/libs.versions.toml, aber _find_template_files schloss das gesamte Verzeichnis
+  'gradle' aus -> der Hint wurde nie geparst (Default/Regex inert).
+- Fix: exclude_dirs auf {.git, build, .gradle} reduziert; 'gradle' wird gescannt, nur
+  gradle/wrapper (Binaries/generierte Properties) bleibt ausgeschlossen. Es werden ohnehin
+  nur Textendungen gescannt (kein .jar). Damit liefert das Template fuer jdk_version jetzt
+  Default 25 UND Regex (24|25); das Rendering laeuft unveraendert ueber _process_directory.
+- Folge (beabsichtigt): die (24|25)-Validierung ist nun aktiv. --jdk-version 21/17 wird mit
+  klarer Meldung abgelehnt (passt zur JDK-Basis >=24 aus v0041); 24/25 und der Default 25
+  funktionieren. test_config_integration test_02 nutzte CLI --jdk_version 17 -> auf 24
+  umgestellt (Testzweck 'CLI ueberschreibt Config' bleibt erhalten).
+- Tests: neuer test_jdk_hint_in_catalog_is_scanned (prueft Default 25 + Regex 24|25 aus dem
+  Katalog); erkennt eine Scanner-Regression (mit altem Ausschluss rot). kotlin_version hat
+  weiterhin keinen Hint -> Default kommt aus Config/Fallback (DEFAULT_PROJECT_DEFAULTS).
+- Betroffenes Repo: nur gradleInit (gradleInit.py, test_gradleInit.py,
+  test_config_integration.py).
 
 v0045: gradle_version ebenfalls absichern + Leerwert-Fall (blanke Config)
 

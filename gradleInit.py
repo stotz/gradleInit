@@ -8,7 +8,7 @@ Architecture: Core + Optional Modules
 - Git required for templates (already a requirement)
 - Modules auto-download on demand
 
-Version: 1.12.2
+Version: 1.12.1
 Author: Urs Stotz
 License: MIT
 """
@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple, Any
 # Version & Constants
 # ============================================================================
 
-SCRIPT_VERSION = "1.12.2"
+SCRIPT_VERSION = "1.12.1"
 MODULES_REPO = "https://github.com/stotz/gradleInitModules.git"
 TEMPLATES_REPO = "https://github.com/stotz/gradleInitTemplates.git"
 SELF_REPO = "https://github.com/stotz/gradleInit.git"
@@ -2400,12 +2400,22 @@ class TemplateHintParser:
         for ext in extensions:
             files.extend(self.template_dir.rglob(f'*{ext}'))
 
-        # Exclude certain directories
-        exclude_dirs = {'.git', 'build', 'gradle', '.gradle'}
-        files = [
-            f for f in files
-            if not any(ex in f.parts for ex in exclude_dirs)
-        ]
+        # Exclude build artifacts, VCS and the Gradle cache. The 'gradle/'
+        # directory itself is scanned because gradle/libs.versions.toml carries
+        # version hints (e.g. the jdk hint); only gradle/wrapper (binaries and the
+        # generated wrapper properties) is skipped.
+        exclude_dirs = {'.git', 'build', '.gradle'}
+
+        def _is_excluded(f: Path) -> bool:
+            parts = f.parts
+            if any(ex in parts for ex in exclude_dirs):
+                return True
+            for i in range(len(parts) - 1):
+                if parts[i] == 'gradle' and parts[i + 1] == 'wrapper':
+                    return True
+            return False
+
+        files = [f for f in files if not _is_excluded(f)]
 
         return files
 

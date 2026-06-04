@@ -956,6 +956,18 @@ class TestStaleConfigGeneration(unittest.TestCase):
         self.assertEqual(jdk.group(1), defaults['jdk_version'])
         self.assertEqual(gradle.group(1), defaults['gradle_version'])
 
+    def test_jdk_hint_in_catalog_is_scanned(self):
+        """The rich jdk hint lives in gradle/libs.versions.toml. The scanner must
+        pick up its default and regex even though gradle/ is otherwise pruned
+        (only gradle/wrapper is skipped)."""
+        cache = Path(tempfile.mkdtemp(dir=self.workdir))
+        md = gradleInit.TemplateMetadata(self.templates_src / 'ktor', cache)
+        args = {a.context_key: a for a in md.get_arguments()}
+        self.assertIn('jdk_version', args)
+        self.assertEqual(args['jdk_version'].default, '25')
+        hints = {h.name: h for h in md.get_template_hints()}
+        self.assertEqual(hints['jdk_version'].regex_pattern, '24|25')
+
 
 class TestCatalogGuard(unittest.TestCase):
     """Guard against generating a version catalog with empty versions."""

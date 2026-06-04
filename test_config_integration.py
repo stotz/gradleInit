@@ -153,7 +153,7 @@ jdk_version = "21"
              "--template", "kotlin-single",
              "--group", "com.override",
              "--project-version", "2.0.0",
-             "--jdk_version", "17",
+             "--jdk_version", "24",
              "--no-interactive"],
             cwd=self.test_dir,
             env=self.env
@@ -175,7 +175,7 @@ jdk_version = "21"
         versions_file = project_dir / "gradle" / "libs.versions.toml"
         assert versions_file.exists(), "libs.versions.toml not created"
         versions_content = versions_file.read_text()
-        assert 'jdk = "17"' in versions_content, f"CLI jdk_version did not override config. Content:\n{versions_content}"
+        assert 'jdk = "24"' in versions_content, f"CLI jdk_version did not override config. Content:\n{versions_content}"
         
         print("[OK] CLI args correctly override config")
     
