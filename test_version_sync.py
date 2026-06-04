@@ -38,10 +38,12 @@ class TestParseSsot(unittest.TestCase):
 
     def test_parses_known_values(self):
         ssot, overrides = version_sync.parse_ssot(VERSIONS_DIR)
-        self.assertEqual(ssot["kotlin"], "2.3.10")
-        self.assertEqual(ssot["gradle"], "9.3.1")
-        self.assertEqual(ssot["junit"], "5.13.4")
-        self.assertEqual(ssot["shadow"], "9.3.1")
+        # Assert the parser exposes the expected keys (including the synthetic
+        # 'gradle') with version-shaped values. Values are intentionally not
+        # pinned here so the test does not go stale on every version bump.
+        for key in ("kotlin", "gradle", "junit", "shadow"):
+            self.assertIn(key, ssot)
+            self.assertRegex(ssot[key], r"^\d+\.\d+")
         self.assertEqual(overrides, [])
 
 
@@ -169,11 +171,16 @@ class TestApplyRoundtrip(unittest.TestCase):
             # No-op apply on the consistent copy changes nothing.
             self.assertEqual(version_sync.run_apply(tmp_root), [])
 
-            # Bump JUnit in the SSoT only.
+            # Bump JUnit in the SSoT only (read the current value so the test
+            # stays correct across version bumps).
+            ssot_dict, _ = version_sync.parse_ssot(
+                tmp_root / "gradleInit" / "versions"
+            )
+            current_junit = ssot_dict["junit"]
             ssot_toml = tmp_root / "gradleInit" / "versions" / "gradle" / "libs.versions.toml"
             ssot_toml.write_text(
                 ssot_toml.read_text(encoding="utf-8").replace(
-                    'junit = "5.13.4"', 'junit = "5.99.0"'
+                    f'junit = "{current_junit}"', 'junit = "9.99.0"'
                 ),
                 encoding="utf-8",
             )
@@ -190,7 +197,7 @@ class TestApplyRoundtrip(unittest.TestCase):
             # The propagated value is present in a template catalog.
             cat = (tmp_root / "gradleInitTemplates" / "kotlin-single"
                    / "gradle" / "libs.versions.toml").read_text(encoding="utf-8")
-            self.assertIn('junit = "5.99.0"', cat)
+            self.assertIn('junit = "9.99.0"', cat)
 
 
 class TestUpdateMode(unittest.TestCase):

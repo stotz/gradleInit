@@ -1163,9 +1163,9 @@ class GradleInitPaths:
             'defaults': {
                 'group': 'com.example',
                 'version': '0.1.0',
-                'gradle_version': '9.3.1',
+                'gradle_version': DEFAULT_GRADLE_VERSION,
                 'kotlin_version': '2.4.0',
-                'jdk_version': '21'
+                'jdk_version': '25'
             },
             'versions': {
                 'maven_recent_hours': 48
