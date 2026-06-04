@@ -511,8 +511,8 @@ class TestTemplateGeneration(unittest.TestCase):
         self.assertTrue(app_file.exists())
 
         app_content = app_file.read_text()
-        self.assertIn('embeddedServer', app_content)
-        self.assertIn('Netty', app_content)
+        self.assertIn('fun Application.module()', app_content)
+        self.assertIn('routing', app_content)
 
     def test_ktor_gradle_build(self):
         """Test ktor builds with Gradle"""
@@ -794,9 +794,21 @@ class TestPerformance(unittest.TestCase):
                 'group': 'com.test',
                 'version': '1.0.0',
                 'kotlin_version': '2.2.0',
-                'jdk_version': 21,
+                'gradle_version': '9.0',
+                'jdk_version': 25,
                 'vendor': 'Test Vendor',
-                'date': '2025-11-15'
+                'date': '2025-11-15',
+                # Feature flags (templates use StrictUndefined, so all must be set)
+                'enable_clikt': False,
+                'enable_shadow': False,
+                'enable_detekt': False,
+                'enable_dokka': False,
+                'enable_kover': False,
+                # Optional fields with defaults
+                'company': 'Test Company',
+                'author': 'Test Author',
+                'description': 'Test project',
+                'version_policy': '@pin'
             }
 
             # Create template metadata with cache

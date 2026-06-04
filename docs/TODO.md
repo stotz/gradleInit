@@ -12,12 +12,12 @@
 
 
 
-## Aktueller Stand (v0041)
+## Aktueller Stand (v0042)
 
 gradleInit ist ein Python-basiertes Tool zur Generierung von Kotlin/Gradle-Projekten aus Templates.
 Verwendet Jinja2 fuer Template-Verarbeitung mit inline Hint-System.
-SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.11.0; die 4-stellige AI-Versionierung
-ist davon getrennt und laeuft linear (zuletzt v0041).
+SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.0; die 4-stellige AI-Versionierung
+ist davon getrennt und laeuft linear (zuletzt v0042).
 
 Hinweis zur History: Die Versionstabelle unten ist zwischen v0023 und v0024 unvollstaendig.
 Einige Features (erweiterte Hint-Syntax mit Regex, Template-Compilation-Cache) sind im Code
@@ -38,6 +38,26 @@ Hauptfeatures:
 - --latest Flag fuer @* statt @pin Version-Constraints
 
 ## Aktuelle Arbeit
+
+v0042: CI-Release-Fix (test_gradleInit.py) und TODO.md-Bereinigung
+
+- Release-Workflow lief auf Tag v1.12.0 rot: test_gradleInit.py hatte zwei
+  vorbestehende Test-Altlasten (unabhaengig vom v1.12.0-Inhalt; der Workflow
+  fuehrt nur test_gradleInit.py aus).
+- test_ktor_generation: pruefte veraltet 'embeddedServer'/'Netty' in Application.kt.
+  Das ktor-Template nutzt das EngineMain-Muster (fun Application.module() +
+  application.yaml), kein embeddedServer mehr. Assertion auf 'fun Application.module()'
+  und 'routing' umgestellt.
+- test_generation_speed (TestPerformance): baute einen Minimalkontext ohne die
+  Feature-Flags und scheiterte an 'enable_clikt is undefined' (StrictUndefined).
+  Kontext um enable_clikt/enable_shadow/enable_detekt/enable_dokka/enable_kover,
+  version_policy und optionale Felder ergaenzt (analog zu _generate_project);
+  jdk_version auf 25 angehoben.
+- Verifikation: beide Tests lokal gruen; voller test_gradleInit.py-Lauf nur mit den
+  vier gradle_build-Tests rot (Sandbox ohne Gradle; in der CI gruen).
+- docs/TODO.md: interne Arbeitsdoku-Verweise aus den 'Betroffenes Repo'-Zeilen
+  entfernt; TODO.md wird als getrackter, oeffentlicher Snapshot gefuehrt.
+- Betroffenes Repo: nur gradleInit (test_gradleInit.py, docs/TODO.md).
 
 v0041: JDK-Basis >= 24, Spring Boot 4.0.6, Virtual Threads, Resolver-Pre-Release-Fix
 
@@ -89,7 +109,7 @@ v0040: Zeilenende-unabhaengige Signatur-Verifikation (Wurzelfix)
 - Tests (TDD): TestLineEndingNormalization (normalize, NUL-Binary, _get_file_hash
   CRLF==LF, sign/verify-Roundtrip ueber eine CRLF-Working-Copy) und zwei neue
   Faelle in TestVerifySingleFile (CRLF-Script, CRLF-Checksums verifizieren).
-- Betroffenes Repo: nur gradleInit (gradleInit.py, test_self_update.py, AI_TODO).
+- Betroffenes Repo: nur gradleInit (gradleInit.py, test_self_update.py).
 
 v0039: Fix CRLF der SSoT-libs.versions.toml bei version_sync --update
 
@@ -102,7 +122,7 @@ v0039: Fix CRLF der SSoT-libs.versions.toml bei version_sync --update
 - Test (TDD): test_run_update_ssot_toml_is_lf (FakeMaven erzwingt ein Lib-Update,
   prueft mockk -> 1.1.0 und kein \r in der SSoT-toml); deckt zugleich den Lib-Pfad in
   run_update ab, den der bisherige Test nicht traf.
-- Betroffenes Repo: nur gradleInit (tools/version_sync.py, Test, AI_TODO).
+- Betroffenes Repo: nur gradleInit (tools/version_sync.py, Test).
 
 v0038: Fix CRLF beim Schreiben in version_sync (signaturrelevant)
 
@@ -119,7 +139,7 @@ v0038: Fix CRLF beim Schreiben in version_sync (signaturrelevant)
 - Hinweis: betrifft nur version_sync (das die signierten Repos editiert). Der
   End-User-Pfad (versions --update auf einem generierten Projekt) ist nicht
   signaturrelevant fuer gradleInit und bleibt unveraendert.
-- Betroffenes Repo: nur gradleInit (tools/version_sync.py, Test, AI_TODO).
+- Betroffenes Repo: nur gradleInit (tools/version_sync.py, Test).
 
 v0037: Fix Pre-Release-Versionen bei Lib-Updates (Milestone/RC ausschliessen)
 
@@ -139,7 +159,7 @@ v0037: Fix Pre-Release-Versionen bei Lib-Updates (Milestone/RC ausschliessen)
   ziehen will, muss das manuell tun (derzeit kein Opt-in-Flag).
 - Test (TDD): TestIsStable (stabile inkl. .RELEASE/.Final akzeptiert,
   Pre-Releases abgelehnt).
-- Betroffenes Repo: nur gradleInit (gradleInit.py, Test, AI_TODO).
+- Betroffenes Repo: nur gradleInit (gradleInit.py, Test).
 
 v0036: Fix bloesses @^/@~ im Lib-Pfad + transparente Anzeige in version_sync --update
 
@@ -160,7 +180,7 @@ v0036: Fix bloesses @^/@~ im Lib-Pfad + transparente Anzeige in version_sync --u
   DEFAULT_GRADLE_VERSION in gradleInit.py.
 - Test (TDD): TestConstraintAnchor (bloesses caret/tilde verankert, andere
   Constraints unveraendert, anschliessend satisfies).
-- Betroffenes Repo: nur gradleInit (gradleInit.py, tools/version_sync.py, Tests, AI_TODO).
+- Betroffenes Repo: nur gradleInit (gradleInit.py, tools/version_sync.py, Tests).
 - Folge: ein erneutes version_sync --update findet jetzt die @^-Lib-Updates; das
   anschliessende --apply aendert dann auch gradleInitTemplates.
 
@@ -181,7 +201,7 @@ v0035: version_sync --update implementiert
 - Test (TDD): TestUpdateMode (gradle_ssot_plan: caret/pin/keine-Policy; run_update
   schreibt nur die SSoT-wrapper.properties via injiziertem gi + maven_central=None);
   test_gradle_update um bare-caret erweitert.
-- Betroffenes Repo: nur gradleInit (tools/version_sync.py, gradleInit.py, Tests, AI_TODO).
+- Betroffenes Repo: nur gradleInit (tools/version_sync.py, gradleInit.py, Tests).
 - Damit sind --check / --apply / --update alle implementiert.
 
 v0034: Fix Gradle-Versionsfilter (Nightly/RC schluepften durch)
@@ -200,7 +220,7 @@ v0034: Fix Gradle-Versionsfilter (Nightly/RC schluepften durch)
   mehr.
 - Test (TDD): TestFilterGradleVersions (Default schliesst Nightly/RC/Milestone/broken
   aus; include_nightly/include_rc), TestSelectTarget.test_ignores_nightly_and_rc.
-- Betroffenes Repo: nur gradleInit (gradleInit.py, Test, AI_TODO).
+- Betroffenes Repo: nur gradleInit (gradleInit.py, Test).
 
 v0033: gradleInit --update all (Tool + Templates + Module)
 
@@ -216,7 +236,7 @@ v0033: gradleInit --update all (Tool + Templates + Module)
   Sektion; Sammel-Exitcode (1, falls ein Schritt fehlschlaegt).
 - Test (TDD): TestSelfUpdateTarget (self/all/ALL/None inkl. kein Kapern von
   templates/modules/versions).
-- Betroffenes Repo: nur gradleInit (gradleInit.py, Test, AI_TODO).
+- Betroffenes Repo: nur gradleInit (gradleInit.py, Test).
 
 v0032: Gradle-Policy-Parser streng gemacht
 
@@ -227,7 +247,7 @@ v0032: Gradle-Policy-Parser streng gemacht
   Gradle-Update, keine Fehlermeldung.
 - Test (TDD) angepasst: strenge Ablehnung der Nicht-kanonischen Formen statt
   =-Toleranz.
-- Betroffenes Repo: nur gradleInit (gradleInit.py, Test, AI_TODO). Templates und
+- Betroffenes Repo: nur gradleInit (gradleInit.py, Test). Templates und
   SSoT bleiben unveraendert (ihr Format "# gradle ... @..." erfuellt die strenge
   Regel bereits).
 
@@ -253,7 +273,7 @@ v0031: Gradle-Update in versions --update (End-User)
   "# gradle @^" gebracht.
 - Test (TDD, neu): test_gradle_update.py (Policy-Parsing, Versions-Extraktion/Rewrite,
   Zielauswahl inkl. @*, @<10.0.0, @^, @pin, kein-neueres).
-- Betroffene Repos: gradleInit (gradleInit.py, neuer Test, SSoT-Kommentar, AI_TODO),
+- Betroffene Repos: gradleInit (gradleInit.py, neuer Test, SSoT-Kommentar),
   gradleInitTemplates (6 libs.versions.toml).
 - Offen/parkt: dieselbe Mechanik fuer version_sync --update (SSoT-Wrapper).
 
@@ -270,7 +290,7 @@ v0030: Fix Regression aus v0029 - globales --update kaperte Subcommand-Updates
   ihr eigenes --update. Phase-1-Dispatch nutzt diesen Helper.
 - Test (TDD, erweitert): test_self_update.py um TestSelfUpdateRequest (update ohne
   command -> True; update mit templates/modules/versions/init -> False).
-- Betroffenes Repo: nur gradleInit (gradleInit.py, Test, AI_TODO).
+- Betroffenes Repo: nur gradleInit (gradleInit.py, Test).
 - Wichtig fuer die Wiederherstellung: nach Update des Tools muss "templates --update"
   erneut laufen, damit das Cache die korrigierten Templates (Toolchain-Fix v0027)
   zieht. Voraussetzung: die korrigierten Templates sind tatsaechlich nach GitHub
@@ -295,7 +315,7 @@ v0029: gradleInit --update (Selbst-Update)
   detect_install_type (git vs single-file), _verify_single_file (gueltig, falsche
   Signatur, manipuliertes Script, fehlender Eintrag). Netzwerk/git-pull/Replace sind
   duenne Wrapper, vom CI verifiziert.
-- Betroffenes Repo: nur gradleInit (gradleInit.py, neuer Test, AI_TODO).
+- Betroffenes Repo: nur gradleInit (gradleInit.py, neuer Test).
 
 Reihenfolge der naechsten Schritte (mit Urs abgestimmt)
 
@@ -315,7 +335,7 @@ v0028: Fix gradle-wrapper.jar wird git-ignoriert (.gitignore-Reihenfolge)
   zu multiproject-root, das bereits korrekt war. Root-Cause-Fix statt git add -f.
 - Test (TDD, neu): test_wrapper_gitignore.py prueft mit git check-ignore (Ground
   Truth) je Template, dass gradle/wrapper/gradle-wrapper.jar NICHT ignoriert wird.
-- Betroffene Repos: gradleInitTemplates (5 .gitignore), gradleInit (neuer Test, AI_TODO).
+- Betroffene Repos: gradleInitTemplates (5 .gitignore), gradleInit (neuer Test).
 
 v0027: Fix JVM-Toolchain (JDK-25-Build)
 
@@ -336,7 +356,7 @@ v0027: Fix JVM-Toolchain (JDK-25-Build)
 - Toolchain == ausgewaehltes JDK; Java- und Kotlin-Bytecode-Target damit konsistent.
 - Test (TDD, neu): test_toolchain.py - kein Build-File darf jvmToolchain(minOf(...))
   verwenden; jede jvmToolchain-Stelle referenziert das JDK.
-- Betroffene Repos: gradleInitTemplates (8 Build-Files), gradleInit (neuer Test, AI_TODO).
+- Betroffene Repos: gradleInitTemplates (8 Build-Files), gradleInit (neuer Test).
 - Hinweis (CHECKSUMS): nach Aenderungen in beiden Repos neu signieren (sign.sh).
 
 v0026: version_sync.py --apply
