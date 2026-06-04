@@ -49,6 +49,17 @@ SCOOP_SHIMS_DIR = os.path.join(SCOOP_DIR, 'shims') if SCOOP_DIR else None
 DEFAULT_GRADLE_VERSION = "9.5.1"
 GRADLE_VERSIONS_URL = "https://services.gradle.org/versions/all"
 
+# Default project values for a fresh config; also used as fallbacks when an older
+# config file predates a key. Single source so version_sync can keep the literal
+# versions (e.g. kotlin_version) in sync with the SSoT.
+DEFAULT_PROJECT_DEFAULTS = {
+    'group': 'com.example',
+    'version': '0.1.0',
+    'gradle_version': DEFAULT_GRADLE_VERSION,
+    'kotlin_version': '2.4.0',
+    'jdk_version': '25',
+}
+
 # Security: Official public key for signed repositories
 # This key is used to verify official gradleInit templates and modules
 OFFICIAL_PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
@@ -1160,13 +1171,7 @@ class GradleInitPaths:
                 'auto_load': True,
                 'version': MODULES_VERSION
             },
-            'defaults': {
-                'group': 'com.example',
-                'version': '0.1.0',
-                'gradle_version': DEFAULT_GRADLE_VERSION,
-                'kotlin_version': '2.4.0',
-                'jdk_version': '25'
-            },
+            'defaults': dict(DEFAULT_PROJECT_DEFAULTS),
             'versions': {
                 'maven_recent_hours': 48
             },
@@ -3303,6 +3308,29 @@ def _to_kebab_case(s: str) -> str:
 # Template Engine - Project Generator
 # ============================================================================
 
+def find_empty_catalog_versions(catalog_path: Path) -> List[str]:
+    """Return names of [versions] entries whose value rendered empty.
+
+    An empty version in a Gradle version catalog (e.g. kotlin = "") is always
+    invalid and makes Gradle reject the catalog, so this is used as a guard after
+    rendering a generated project.
+    """
+    if not catalog_path.exists():
+        return []
+    empty: List[str] = []
+    in_versions = False
+    for raw_line in catalog_path.read_text(encoding='utf-8').splitlines():
+        line = raw_line.strip()
+        if line.startswith('['):
+            in_versions = (line == '[versions]')
+            continue
+        if in_versions and not line.startswith('#') and '=' in line:
+            key, _, value = line.partition('=')
+            if value.strip().strip('"').strip("'") == '':
+                empty.append(key.strip())
+    return empty
+
+
 class ProjectGenerator:
     """Generate project from template using Jinja2"""
 
@@ -3373,6 +3401,21 @@ class ProjectGenerator:
             # 2. Process template files
             print_info("Processing template files...")
             self._process_directory(self.template_path, self.target_path)
+
+            # 2b. Guard: a generated version catalog must not contain empty
+            # versions. An empty entry (e.g. kotlin = "") makes Gradle reject the
+            # catalog and the wrapper step fail, leaving an unusable project.
+            empty_versions = find_empty_catalog_versions(
+                self.target_path / 'gradle' / 'libs.versions.toml')
+            if empty_versions:
+                print_error(
+                    "Generated version catalog has empty version(s): "
+                    + ", ".join(empty_versions))
+                print_info(
+                    "A required version was not provided. Set it via the matching "
+                    "CLI option (e.g. --kotlin-version), the config defaults, or "
+                    "--config, then generate again.")
+                return False
 
             # 3. Post-generation tasks
             self._run_post_generation_tasks()
@@ -4844,6 +4887,12 @@ def handle_init_command(args: argparse.Namespace,
             # Use config default or hardcoded default
             gradle_version = get_config_default(config, 'gradle_version', DEFAULT_GRADLE_VERSION)
 
+        # Never proceed with an empty Gradle version. Older or hand-edited config
+        # files may carry a blank gradle_version, which get_config_default returns
+        # as-is; that would call `gradle wrapper --gradle-version ""` and fail.
+        if not gradle_version:
+            gradle_version = DEFAULT_GRADLE_VERSION
+
         # Override CLI args with selected version
         args.gradle_version = gradle_version
         print_info(f"Using Gradle version: {gradle_version}")
@@ -4873,6 +4922,15 @@ def handle_init_command(args: argparse.Namespace,
 
         # Set version_policy based on --latest flag
         context['version_policy'] = '@*' if getattr(args, 'latest', False) else '@pin'
+
+        # Ensure required version variables are never empty. Older config files may
+        # predate these defaults (key missing) or carry a blank value, and templates
+        # reference them as placeholders, so an empty value would render an invalid
+        # version catalog (e.g. kotlin = "", jdk = "") that Gradle rejects.
+        for _vkey in ('kotlin_version', 'jdk_version', 'gradle_version'):
+            if not context.get(_vkey):
+                context[_vkey] = get_config_default(
+                    config, _vkey, DEFAULT_PROJECT_DEFAULTS[_vkey]) or DEFAULT_PROJECT_DEFAULTS[_vkey]
 
         # Show context summary
         print_info("Context values:")
@@ -5103,6 +5161,13 @@ def handle_subproject_command(args: argparse.Namespace,
 
     # Set version_policy based on --latest flag
     context['version_policy'] = '@*' if getattr(args, 'latest', False) else '@pin'
+
+    # Ensure required version variables are never empty (older config files may
+    # lack the defaults or carry blank values).
+    for _vkey in ('kotlin_version', 'jdk_version', 'gradle_version'):
+        if not context.get(_vkey):
+            context[_vkey] = get_config_default(
+                config, _vkey, DEFAULT_PROJECT_DEFAULTS[_vkey]) or DEFAULT_PROJECT_DEFAULTS[_vkey]
 
     # Print summary
     print()

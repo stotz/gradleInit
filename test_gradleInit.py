@@ -829,6 +829,173 @@ class TestPerformance(unittest.TestCase):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+class TestStaleConfigGeneration(unittest.TestCase):
+    """End-to-end: a ~/.gradleInit/config without usable version defaults must
+    still produce a valid project. Two failure modes are covered:
+      - 'strip': the version keys are absent (config written by an older release).
+      - 'blank': the version keys exist but are empty (get_config_default returns
+                 the empty value, not the fallback).
+    For kotlin, jdk and gradle, neither must end up empty.
+
+    This drives the real CLI path (ContextBuilder + config + fallbacks). The older
+    TestTemplateGeneration hand-builds the context with the versions already set,
+    so it never exercised this bug.
+    """
+
+    TEMPLATES = ['kotlin-single', 'kotlin-multi', 'ktor', 'springboot', 'kotlin-javaFX']
+    VERSION_KEYS = ('kotlin_version', 'jdk_version', 'gradle_version')
+
+    @classmethod
+    def setUpClass(cls):
+        cls.workdir = Path(tempfile.mkdtemp(prefix='gradleInit_stale_'))
+        # Prefer a local sibling checkout; otherwise clone the public templates.
+        sibling = Path(gradleinit_path).resolve().parent.parent / 'gradleInitTemplates'
+        if (sibling / 'ktor' / 'gradle' / 'libs.versions.toml').exists():
+            cls.templates_src = sibling
+        else:
+            clone = cls.workdir / 'templates_src'
+            result = subprocess.run(
+                ['git', 'clone', '--depth', '1',
+                 'https://github.com/stotz/gradleInitTemplates.git', str(clone)],
+                capture_output=True, text=True)
+            if result.returncode != 0:
+                raise unittest.SkipTest(f"templates unavailable: {result.stderr}")
+            cls.templates_src = clone
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.workdir, ignore_errors=True)
+
+    def _make_home(self, mode):
+        """Create a HOME with a config whose version defaults are unusable.
+
+        mode='strip' removes the version keys; mode='blank' sets them to "".
+        """
+        import re
+        home = Path(tempfile.mkdtemp(prefix='home_', dir=self.workdir))
+        env = os.environ.copy()
+        env['HOME'] = str(home)
+        env['USERPROFILE'] = str(home)  # Windows
+        subprocess.run([sys.executable, gradleinit_path, '--version'],
+                       env=env, capture_output=True, text=True, timeout=120)
+        config = home / '.gradleInit' / 'config'
+        self.assertTrue(config.exists(), 'default config was not created')
+        text = config.read_text(encoding='utf-8')
+        for key in self.VERSION_KEYS:
+            if mode == 'strip':
+                text = re.sub(r'(?m)^\s*%s\s*=.*\n' % key, '', text)
+            else:  # blank
+                text = re.sub(r'(?m)^(\s*%s\s*=\s*).*$' % key, r'\1""', text)
+        config.write_text(text, encoding='utf-8')
+        official = home / '.gradleInit' / 'templates' / 'official'
+        official.mkdir(parents=True, exist_ok=True)
+        for child in self.templates_src.iterdir():
+            if child.is_dir() and child.name != '.git':
+                shutil.copytree(child, official / child.name)
+        return home, env
+
+    def _run_init(self, env, projects_dir, template, project_name):
+        return subprocess.run(
+            [sys.executable, gradleinit_path, 'init', project_name,
+             '--template', template, '--group', 'com.test'],
+            cwd=str(projects_dir), env=env,
+            capture_output=True, text=True,
+            stdin=subprocess.DEVNULL, timeout=300)
+
+    def _check_all_templates(self, mode):
+        import re
+        home, env = self._make_home(mode)
+        projects = home / 'projects'
+        projects.mkdir()
+        for template in self.TEMPLATES:
+            with self.subTest(mode=mode, template=template):
+                name = 'P_' + template.replace('-', '_')
+                result = self._run_init(env, projects, template, name)
+                catalog = projects / name / 'gradle' / 'libs.versions.toml'
+                self.assertTrue(
+                    catalog.exists(),
+                    f"[{mode}/{template}] catalog missing.\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}")
+                empty = gradleInit.find_empty_catalog_versions(catalog)
+                self.assertEqual(
+                    [], empty,
+                    f"[{mode}/{template}] empty catalog version(s) {empty}")
+                self.assertIn(
+                    'created successfully', result.stdout,
+                    f"[{mode}/{template}] init did not report success.\nSTDOUT:\n{result.stdout}")
+                # gradle_version is not rendered into the catalog; it drives the
+                # wrapper. Verify it resolved to a non-empty version.
+                gradle = re.search(r'Using Gradle version:\s*(\S+)', result.stdout)
+                self.assertIsNotNone(
+                    gradle, f"[{mode}/{template}] no resolved Gradle version in output")
+                self.assertRegex(
+                    gradle.group(1), r'^\d+\.\d+',
+                    f"[{mode}/{template}] empty/invalid Gradle version")
+
+    def test_missing_version_keys(self):
+        self._check_all_templates('strip')
+
+    def test_blank_version_keys(self):
+        self._check_all_templates('blank')
+
+    def test_versions_fall_back_to_managed_defaults(self):
+        import re
+        # 'blank' is the stricter case (key present but empty).
+        home, env = self._make_home('blank')
+        projects = home / 'projects'
+        projects.mkdir()
+        result = self._run_init(env, projects, 'ktor', 'Probe')
+        catalog = (projects / 'Probe' / 'gradle' / 'libs.versions.toml').read_text(encoding='utf-8')
+        defaults = gradleInit.DEFAULT_PROJECT_DEFAULTS
+        kotlin = re.search(r'(?m)^kotlin\s*=\s*"([^"]*)"', catalog)
+        jdk = re.search(r'(?m)^jdk\s*=\s*"([^"]*)"', catalog)
+        gradle = re.search(r'Using Gradle version:\s*(\S+)', result.stdout)
+        self.assertIsNotNone(kotlin)
+        self.assertIsNotNone(jdk)
+        self.assertIsNotNone(gradle)
+        self.assertEqual(kotlin.group(1), defaults['kotlin_version'])
+        self.assertEqual(jdk.group(1), defaults['jdk_version'])
+        self.assertEqual(gradle.group(1), defaults['gradle_version'])
+
+
+class TestCatalogGuard(unittest.TestCase):
+    """Guard against generating a version catalog with empty versions."""
+
+    def _write_catalog(self, body: str) -> Path:
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        catalog = tmp / 'libs.versions.toml'
+        catalog.write_text(body, encoding='utf-8')
+        return catalog
+
+    def test_detects_empty_version(self):
+        catalog = self._write_catalog(
+            '[versions]\n'
+            'kotlin = ""\n'
+            'junit = "6.1.0"\n\n'
+            '[plugins]\n'
+            'kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }\n'
+        )
+        self.assertEqual(gradleInit.find_empty_catalog_versions(catalog), ['kotlin'])
+
+    def test_accepts_all_present(self):
+        catalog = self._write_catalog(
+            '[versions]\n'
+            'kotlin = "2.4.0"\n'
+            'junit = "6.1.0"\n'
+        )
+        self.assertEqual(gradleInit.find_empty_catalog_versions(catalog), [])
+
+    def test_missing_catalog_is_ok(self):
+        self.assertEqual(
+            gradleInit.find_empty_catalog_versions(Path('/no/such/libs.versions.toml')),
+            [])
+
+    def test_default_kotlin_version_is_set(self):
+        kotlin = gradleInit.DEFAULT_PROJECT_DEFAULTS['kotlin_version']
+        self.assertTrue(kotlin)
+        self.assertRegex(kotlin, r'^\d+\.\d+')
+
+
 # ============================================================================
 # Test Runner
 # ============================================================================

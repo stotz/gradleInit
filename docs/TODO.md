@@ -12,12 +12,12 @@
 
 
 
-## Aktueller Stand (v0042)
+## Aktueller Stand (v0045)
 
 gradleInit ist ein Python-basiertes Tool zur Generierung von Kotlin/Gradle-Projekten aus Templates.
 Verwendet Jinja2 fuer Template-Verarbeitung mit inline Hint-System.
-SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.0; die 4-stellige AI-Versionierung
-ist davon getrennt und laeuft linear (zuletzt v0042).
+SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.1; die 4-stellige AI-Versionierung
+ist davon getrennt und laeuft linear (zuletzt v0045).
 
 Hinweis zur History: Die Versionstabelle unten ist zwischen v0023 und v0024 unvollstaendig.
 Einige Features (erweiterte Hint-Syntax mit Regex, Template-Compilation-Cache) sind im Code
@@ -38,6 +38,70 @@ Hauptfeatures:
 - --latest Flag fuer @* statt @pin Version-Constraints
 
 ## Aktuelle Arbeit
+
+v0045: gradle_version ebenfalls absichern + Leerwert-Fall (blanke Config)
+
+- Folge aus dem Hinweis "config hat auch gradle_version": get_config_default gibt einen
+  im Config VORHANDENEN, aber leeren Wert zurueck (statt des Fallbacks). Damit brachen
+  kotlin/jdk/gradle nicht nur bei FEHLENDEM Key, sondern auch bei leerem Wert
+  ("Using Gradle version: " leer -> gradle wrapper --gradle-version "" wuerde scheitern;
+  kotlin/jdk wieder leer im Katalog, vom Guard abgefangen).
+- Fix: der Fallback (init + subproject) deckt jetzt kotlin_version, jdk_version UND
+  gradle_version ab und ist robust gegen leere Werte
+  (... or DEFAULT_PROJECT_DEFAULTS[key]). Zusaetzlich faengt die Gradle-Aufloesung im
+  init-Pfad einen leeren Wert ab (gradle_version = DEFAULT_GRADLE_VERSION), damit auch
+  Ausgabe und Wrapper-Aufruf stimmen.
+- Tests: TestStaleConfigGeneration deckt jetzt beide Faelle ueber alle fuenf Templates ab -
+  'strip' (Key fehlt) und 'blank' (Key leer) -, prueft keine leeren Katalog-Versionen und
+  verifiziert die aufgeloeste Gradle-Version aus der Ausgabe. Neuer Test prueft kotlin/jdk/
+  gradle gegen die verwalteten Defaults (DEFAULT_PROJECT_DEFAULTS) statt Hartkodierung.
+  Nachgewiesen: bei deaktiviertem Fix werden strip und blank rot.
+- Betroffenes Repo: nur gradleInit (gradleInit.py, test_gradleInit.py).
+
+v0044: Erweiterung von v0043 - jdk-Version ebenfalls absichern + E2E-Tests
+
+- jdk brach im selben Stale-Config-Szenario wie kotlin (jdk = "" -> ungueltiger
+  Katalog, vom Guard aus v0043 abgefangen). Ursache: der jdk-Hint mit Default 25
+  steht in gradle/libs.versions.toml, aber der Hint-Scanner schliesst das Verzeichnis
+  'gradle' aus -> dieser Default wird nie geparst; nur die nackten {{ jdk_version }}
+  (README) zaehlen, ohne Default. Frische Configs setzen jdk_version (25), aeltere nicht.
+- Fix: init- und subproject-Fallback deckt jetzt kotlin_version UND jdk_version ab
+  (Quelle: DEFAULT_PROJECT_DEFAULTS, also weiterhin eine verwaltete Stelle).
+- Neue E2E-Tests TestStaleConfigGeneration in test_gradleInit.py: erzeugen ueber den
+  echten CLI-Pfad (Subprozess; HOME mit Config ohne kotlin/jdk/gradle) fuer alle fuenf
+  Templates und pruefen, dass der Katalog keine leeren Versionen hat und kotlin/jdk auf
+  die Defaults fallen. Die bisherigen Generierungstests bauen den Context von Hand und
+  konnten den Fehler daher nicht sehen. Nachgewiesen: bei deaktiviertem Fallback werden
+  die Tests rot (['jdk', 'kotlin'] pro Template).
+- Offen/Hinweis: der reiche jdk-Hint in libs.versions.toml ist wegen des 'gradle'-
+  Ausschlusses im Hint-Scanner inert (Regex/Default werden nicht angewendet). Funktional
+  ueber Config-Default + Fallback + Guard abgedeckt; echtes Parsen dieser Hints waere ein
+  separater Schritt.
+- Betroffenes Repo: nur gradleInit (gradleInit.py, test_gradleInit.py).
+
+v0043: Fix - leere kotlin-Version im generierten Katalog (unvollstaendiges Projekt)
+
+- Symptom: `init` mit einer aelteren Config (ohne kotlin_version) erzeugte
+  gradle/libs.versions.toml mit `kotlin = ""`. Gradle lehnt den Katalog ab
+  ("Empty version for plugin alias 'kotlin'"), `gradle wrapper` schlaegt fehl,
+  daher fehlen gradlew/gradlew.bat/gradle/wrapper/*. Das Tool meldete trotzdem
+  "Project created successfully" und committete das unvollstaendige Projekt.
+- Ursache: Alle Templates fuehren `kotlin = "{{ kotlin_version }}"` ohne Default.
+  ContextBuilder liefert fuer eine Variable ohne Quelle einen leeren String.
+  Frische Configs setzen kotlin_version (2.4.0), aeltere Configs nicht -> leer.
+  --latest ist nicht die Ursache (setzt nur version_policy).
+- Fix (nur gradleInit, Templates unveraendert -> keine verstreuten Versionen):
+  * DEFAULT_PROJECT_DEFAULTS als einzige Quelle der Config-Defaults; das Literal
+    'kotlin_version': '2.4.0' bleibt dort erhalten (version_sync verwaltet es weiter).
+  * init- und subproject-Ablauf: kotlin_version faellt auf den Config-Default bzw.
+    DEFAULT_PROJECT_DEFAULTS['kotlin_version'] zurueck, falls leer.
+  * Guard find_empty_catalog_versions: nach dem Rendern wird gradle/libs.versions.toml
+    auf leere [versions]-Eintraege geprueft; bei Fund bricht generate() mit klarer
+    Fehlermeldung ab - kein Wrapper, kein Git-Commit, kein falsches "success".
+- Tests: neue TestCatalogGuard (4) in test_gradleInit.py. version_sync --check gruen,
+  genau ein verwaltetes kotlin-Literal in gradleInit.py. Verbleibende Suite-Fehler nur
+  umgebungsbedingt (Gradle-Builds ohne Gradle, test_cli-Isolation, test_real_compilation).
+- Betroffenes Repo: nur gradleInit (gradleInit.py, test_gradleInit.py).
 
 v0042: CI-Release-Fix (test_gradleInit.py) und TODO.md-Bereinigung
 
