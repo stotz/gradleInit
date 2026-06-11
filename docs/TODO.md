@@ -12,12 +12,12 @@
 
 
 
-## Aktueller Stand (v0046)
+## Aktueller Stand (v0048)
 
 gradleInit ist ein Python-basiertes Tool zur Generierung von Kotlin/Gradle-Projekten aus Templates.
 Verwendet Jinja2 fuer Template-Verarbeitung mit inline Hint-System.
-SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.1; die 4-stellige AI-Versionierung
-ist davon getrennt und laeuft linear (zuletzt v0046).
+SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.2; die 4-stellige AI-Versionierung
+ist davon getrennt und laeuft linear (zuletzt v0048).
 
 Hinweis zur History: Die Versionstabelle unten ist zwischen v0023 und v0024 unvollstaendig.
 Einige Features (erweiterte Hint-Syntax mit Regex, Template-Compilation-Cache) sind im Code
@@ -38,6 +38,45 @@ Hauptfeatures:
 - --latest Flag fuer @* statt @pin Version-Constraints
 
 ## Aktuelle Arbeit
+
+v0048: multiproject-root Katalog auf minimale Basis reduziert
+
+- Problem: der multiproject-root-Katalog (gradle/libs.versions.toml) war ein statischer
+  Superset mit Versionen/Libraries/Plugins fuer ALLE Subprojekt-Typen (ktor, springboot,
+  JavaFX-Stack, clikt) - auch wenn das Projekt diese Typen nie nutzt. Folge: toter Ballast
+  im Katalog (spring-boot, javafx, ...) und 'versions --update' prueft/aktualisiert Libs,
+  die das Projekt nicht referenziert.
+- Fix: Root-Katalog auf die universelle Basis reduziert (jdk, kotlin, kotlin-jvm-Plugin,
+  Gradle-Policy-Kommentar). Die Subprojekt-Templates bringen ihre Eintraege per
+  merge_versions selbst mit; _merge_toml_content fuehrt bereits alle Sektionen zusammen
+  ([versions], [libraries], [plugins], [bundles]). Der Katalog enthaelt am Ende nur, was
+  die hinzugefuegten Subprojekte tatsaechlich nutzen.
+- Verifiziert: frisches multiproject-root + ktor + springboot + kotlin-javaFX + kotlin-single
+  -> alle libs.*-Verweise loesen auf; ktor + 2x kotlin-single -> kein spring/javafx im
+  Katalog. Subprojekt-Merge-Dateien sind selbst vollstaendig (auditiert).
+- Keine Aenderung an gradleInit.py.
+- Betroffenes Repo: gradleInitTemplates (multiproject-root/gradle/libs.versions.toml).
+
+v0047: PyYAML als Pflicht-Dependency + Cache-Selbstheilung + Diagnose
+
+- Ursache des "Template 'ktor' does not support subproject mode" trotz vorhandenem
+  subproject_mode (Zeile 37 im installierten TEMPLATE.md): PyYAML war als OPTIONAL
+  eingestuft und wurde nie installiert. Ohne PyYAML faellt _parse_metadata auf einen
+  flachen Parser zurueck, der verschachtelte Bloecke (subproject_mode, requirements,
+  arguments) nicht lesen kann -> subproject_mode wird zu einem leeren String (falsy).
+  Es war NICHT der Cache und kein veraltetes Template.
+- Fix: PyYAML ist jetzt Pflicht-Dependency (REQUIRED_PACKAGES); der bestehende
+  check_and_install_dependencies()-Dialog installiert es wie toml/jinja2. Kein eigener
+  YAML-Parser (PyYAML ist die robuste Standardloesung). REQUIRED_PACKAGES und
+  OPTIONAL_PACKAGES als Modulkonstanten (testbar). CI installiert PyYAML bereits.
+- Cache-Selbstheilung: der Compiled-Cache wird bei Tool-Versionswechsel automatisch neu
+  gebaut (Versions-Stempel ~/.gradleInit/cache/.tool_version). Eine reine mtime-Pruefung
+  kann Aenderungen an der Kompilierlogik selbst nicht erkennen.
+- Diagnose: gradleInit --version zeigt jetzt Version, Python, YAML-Parser, Pfade und
+  Cache-Status (und fuehrt dabei den Cache-Check aus). base_dir-Anlage robust (parents=True).
+- Tests: TestDependenciesAndCache (PyYAML required; Cache-Rebuild bei Versionswechsel;
+  kein Rebuild bei gleichem Stand).
+- Betroffenes Repo: nur gradleInit (gradleInit.py, test_gradleInit.py).
 
 v0046: Hint-Scanner liest jetzt gradle/libs.versions.toml
 

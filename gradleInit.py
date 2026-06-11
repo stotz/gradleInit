@@ -8,7 +8,7 @@ Architecture: Core + Optional Modules
 - Git required for templates (already a requirement)
 - Modules auto-download on demand
 
-Version: 1.12.2
+Version: 1.12.1
 Author: Urs Stotz
 License: MIT
 """
@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple, Any
 # Version & Constants
 # ============================================================================
 
-SCRIPT_VERSION = "1.12.2"
+SCRIPT_VERSION = "1.12.1"
 MODULES_REPO = "https://github.com/stotz/gradleInitModules.git"
 TEMPLATES_REPO = "https://github.com/stotz/gradleInitTemplates.git"
 SELF_REPO = "https://github.com/stotz/gradleInit.git"
@@ -169,6 +169,18 @@ def prompt_install_package(package_name: str, feature_name: str) -> bool:
         return False
 
 
+# Python package dependencies: module_name -> pip_package_name.
+# PyYAML is required because TEMPLATE.md front-matter uses nested structures
+# (subproject_mode, requirements, arguments) that the no-dependency fallback
+# parser cannot read correctly.
+REQUIRED_PACKAGES = {
+    'toml': 'toml',
+    'jinja2': 'jinja2',
+    'yaml': 'pyyaml',
+}
+OPTIONAL_PACKAGES: Dict[str, str] = {}
+
+
 def check_and_install_dependencies() -> bool:
     """
     Check for required dependencies and offer to install missing ones.
@@ -177,15 +189,13 @@ def check_and_install_dependencies() -> bool:
         True if all required dependencies are available
     """
     # Required packages: module_name -> pip_package_name
-    required = {
-        'toml': 'toml',
-        'jinja2': 'jinja2',
-    }
+    # PyYAML is required: TEMPLATE.md front-matter uses nested structures
+    # (subproject_mode, requirements, arguments) that only a real YAML parser
+    # reads correctly.
+    required = dict(REQUIRED_PACKAGES)
 
     # Optional packages
-    optional = {
-        'yaml': 'pyyaml',
-    }
+    optional = dict(OPTIONAL_PACKAGES)
 
     missing_required = []
     missing_optional = []
@@ -1146,7 +1156,7 @@ class GradleInitPaths:
 
     def ensure_structure(self):
         """Create directory structure if it doesn't exist"""
-        self.base_dir.mkdir(exist_ok=True)
+        self.base_dir.mkdir(parents=True, exist_ok=True)
         self.templates_dir.mkdir(exist_ok=True)
         self.official_templates.mkdir(exist_ok=True)  # Create official templates dir
         self.cache_dir.mkdir(exist_ok=True)
@@ -1154,9 +1164,41 @@ class GradleInitPaths:
         self.compiled_templates.mkdir(exist_ok=True)
         self.custom_templates.mkdir(exist_ok=True)
 
+        # Rebuild the compiled cache when the tool version changed. mtime-based
+        # validity cannot detect changes to the compilation logic itself, so a
+        # cache written by an older gradleInit is cleared on first run of a new
+        # version.
+        self._invalidate_stale_cache()
+
         # Create default config if not exists
         if not self.config_file.exists():
             self._create_default_config()
+
+    def _invalidate_stale_cache(self):
+        """Clear the compiled template cache if gradleInit's version changed."""
+        self.cache_rebuilt = False
+        marker = self.cache_dir / '.tool_version'
+        try:
+            previous = marker.read_text(encoding='utf-8').strip() if marker.exists() else None
+        except OSError:
+            previous = None
+        if previous == SCRIPT_VERSION:
+            return
+        if self.compiled_templates.exists():
+            for child in self.compiled_templates.iterdir():
+                try:
+                    if child.is_dir():
+                        shutil.rmtree(child, ignore_errors=True)
+                    else:
+                        child.unlink()
+                except OSError:
+                    pass
+        try:
+            marker.write_text(SCRIPT_VERSION, encoding='utf-8')
+        except OSError:
+            pass
+        # Only report a rebuild for an actual version change, not first run.
+        self.cache_rebuilt = previous is not None
 
     def _create_default_config(self):
         """Create default config file"""
@@ -5998,13 +6040,39 @@ def handle_update_all(repo_manager: 'TemplateRepositoryManager',
     return overall
 
 
+def print_environment_diagnostics(paths: 'GradleInitPaths') -> None:
+    """Print environment and cache diagnostics. Shown by --version so issues
+    like a missing YAML parser or a stale cache are visible at a glance."""
+    import platform
+    print(f"Python:        {platform.python_version()}")
+    print(f"YAML parser:   {'PyYAML' if HAS_YAML else 'MISSING (run gradleInit to install pyyaml)'}")
+    print(f"Config:        {paths.config_file}")
+    print(f"Templates:     {paths.official_templates}")
+    compiled = paths.compiled_templates
+    files = sum(1 for p in compiled.rglob('*') if p.is_file()) if compiled.exists() else 0
+    marker = paths.cache_dir / '.tool_version'
+    try:
+        stamp = marker.read_text(encoding='utf-8').strip() if marker.exists() else 'none'
+    except OSError:
+        stamp = 'unknown'
+    status = 'rebuilt after version change' if getattr(paths, 'cache_rebuilt', False) else 'up to date'
+    print(f"Cache:         {files} compiled file(s), stamp {stamp} ({status})")
+
+
 def main():
     """Main entry point"""
 
-    # If --version is requested, let argparse handle it (avoids double output)
+    # If --version is requested, show the version plus environment/cache
+    # diagnostics (and run the cache check), then exit.
     if '--version' in sys.argv or '-v' in sys.argv:
-        # Argparse will handle version display and exit
-        pass
+        print(f"gradleInit v{SCRIPT_VERSION}")
+        try:
+            diag_paths = GradleInitPaths()
+            diag_paths.ensure_structure()
+            print_environment_diagnostics(diag_paths)
+        except Exception as exc:
+            print_warning(f"diagnostics unavailable: {exc}")
+        return 0
     else:
         print(f"gradleInit v{SCRIPT_VERSION}")
         print()

@@ -1007,6 +1007,44 @@ class TestCatalogGuard(unittest.TestCase):
         self.assertTrue(kotlin)
         self.assertRegex(kotlin, r'^\d+\.\d+')
 
+class TestDependenciesAndCache(unittest.TestCase):
+    """PyYAML must be a required dependency, and the compiled cache must rebuild
+    itself when the tool version changes."""
+
+    def test_pyyaml_is_required(self):
+        self.assertIn('yaml', gradleInit.REQUIRED_PACKAGES)
+        self.assertEqual(gradleInit.REQUIRED_PACKAGES['yaml'], 'pyyaml')
+        self.assertNotIn('yaml', gradleInit.OPTIONAL_PACKAGES)
+
+    def _paths(self, base):
+        return gradleInit.GradleInitPaths(base_dir=base / '.gradleInit')
+
+    def test_cache_rebuilt_on_version_change(self):
+        base = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, base, ignore_errors=True)
+        paths = self._paths(base)
+        paths.ensure_structure()  # writes current stamp
+        stale = paths.compiled_templates / 'ktor' / 'build.gradle.kts'
+        stale.parent.mkdir(parents=True, exist_ok=True)
+        stale.write_text('stale', encoding='utf-8')
+        (paths.cache_dir / '.tool_version').write_text('0.0.0', encoding='utf-8')
+
+        paths2 = self._paths(base)
+        paths2.ensure_structure()
+        self.assertFalse(stale.exists(), 'stale compiled cache was not cleared')
+        self.assertTrue(paths2.cache_rebuilt)
+        self.assertEqual(
+            (paths2.cache_dir / '.tool_version').read_text(encoding='utf-8').strip(),
+            gradleInit.SCRIPT_VERSION)
+
+    def test_cache_not_rebuilt_when_current(self):
+        base = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, base, ignore_errors=True)
+        self._paths(base).ensure_structure()
+        paths2 = self._paths(base)
+        paths2.ensure_structure()
+        self.assertFalse(paths2.cache_rebuilt)
+
 
 # ============================================================================
 # Test Runner
