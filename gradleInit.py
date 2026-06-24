@@ -8,7 +8,7 @@ Architecture: Core + Optional Modules
 - Git required for templates (already a requirement)
 - Modules auto-download on demand
 
-Version: 1.12.3
+Version: 1.12.1
 Author: Urs Stotz
 License: MIT
 """
@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple, Any
 # Version & Constants
 # ============================================================================
 
-SCRIPT_VERSION = "1.12.3"
+SCRIPT_VERSION = "1.12.1"
 MODULES_REPO = "https://github.com/stotz/gradleInitModules.git"
 TEMPLATES_REPO = "https://github.com/stotz/gradleInitTemplates.git"
 SELF_REPO = "https://github.com/stotz/gradleInit.git"
@@ -1774,7 +1774,7 @@ class VersionManager:
             return (match.group(1), match.group(2))
         return ('', '')
 
-    def check_updates(self, maven_central=None, include_recent: bool = False, recent_hours: int = 48) -> List[Dict[str, Any]]:
+    def check_updates(self, maven_central=None, include_recent: bool = False, recent_hours: int = 48, force_latest: bool = False) -> List[Dict[str, Any]]:
         """
         Check for available updates.
 
@@ -1794,6 +1794,15 @@ class VersionManager:
                 'age_hours': None
             }
 
+            # Templated placeholder value (e.g. "{{ kotlin_version }}" or a JDK
+            # hint). These are driven by gradleInit's own defaults, not by Maven
+            # Central, so they must never be rewritten to a literal.
+            if '{{' in entry.current_version:
+                result['status'] = 'TEMPLATED'
+                result['message'] = 'templated value (managed by gradleInit defaults)'
+                results.append(result)
+                continue
+
             # No URL = skip
             if not entry.url:
                 result['status'] = 'SKIP'
@@ -1801,10 +1810,15 @@ class VersionManager:
                 results.append(result)
                 continue
 
-            # Pinned
-            if entry.constraint == 'pin' or entry.constraint is None:
+            # --latest forces every URL-backed, literal entry to track the newest
+            # release, overriding @pin / implicit-pin. Used to refresh the
+            # template catalogs to current versions.
+            constraint = '*' if force_latest else entry.constraint
+
+            # Pinned (unless --latest overrides)
+            if not force_latest and (constraint == 'pin' or constraint is None):
                 # URL without @constraint = implicitly pinned
-                if entry.constraint == 'pin':
+                if constraint == 'pin':
                     result['status'] = 'PINNED'
                     result['message'] = '@pin'
                 else:
@@ -1815,18 +1829,18 @@ class VersionManager:
 
             # Anchor a bare caret/tilde (e.g. '@^', as used by the SSoT) to the
             # current version before evaluating the constraint.
-            effective_constraint = VersionConstraintChecker.anchor(entry.constraint, entry.current_version)
+            effective_constraint = VersionConstraintChecker.anchor(constraint, entry.current_version)
             ctype, cvalue = VersionConstraintChecker.parse_constraint(effective_constraint)
 
             if ctype == 'unknown':
                 result['status'] = 'UNKNOWN'
-                result['message'] = f'invalid constraint @{entry.constraint}'
+                result['message'] = f'invalid constraint @{constraint}'
                 results.append(result)
                 continue
 
             if ctype == 'exact':
                 result['status'] = 'PINNED'
-                result['message'] = f'@{entry.constraint}'
+                result['message'] = f'@{constraint}'
                 results.append(result)
                 continue
 
@@ -1865,7 +1879,7 @@ class VersionManager:
 
                         if latest is None:
                             result['status'] = 'VIOLATE'
-                            result['message'] = f'no version satisfies @{entry.constraint}'
+                            result['message'] = f'no version satisfies @{constraint}'
                         elif latest == entry.current_version:
                             result['status'] = 'CURRENT'
                             result['message'] = 'up to date'
@@ -1882,10 +1896,10 @@ class VersionManager:
                                 result['message'] = f'released {age_hours:.0f}h ago - use --include-recent'
                             else:
                                 result['status'] = 'UPDATE'
-                                result['message'] = f'@{entry.constraint}'
+                                result['message'] = f'@{constraint}'
                         else:
                             result['status'] = 'VIOLATE'
-                            result['message'] = f'{latest} violates @{entry.constraint}'
+                            result['message'] = f'{latest} violates @{constraint}'
                     except Exception as e:
                         result['status'] = 'ERROR'
                         result['message'] = str(e)
@@ -2970,6 +2984,9 @@ class DynamicCLIBuilder:
                                       help='Apply updates without confirmation')
         versions_parser.add_argument('--include-recent', action='store_true',
                                       help=f'Include versions released less than {recent_hours} hours ago')
+        versions_parser.add_argument('--latest', action='store_true',
+                                      help='Force every URL-backed entry to the newest release, '
+                                           'ignoring @pin (used to refresh template catalogs)')
         versions_parser.add_argument('dependency', nargs='?',
                                       help='Specific dependency to update (optional)')
 
@@ -5348,12 +5365,14 @@ def handle_versions_command(args: argparse.Namespace) -> int:
     config = load_config(paths.config_file)
     recent_hours = config.get('versions', {}).get('maven_recent_hours', 48)
     include_recent = getattr(args, 'include_recent', False)
-    results = manager.check_updates(maven_central, include_recent=include_recent, recent_hours=recent_hours)
+    force_latest = getattr(args, 'latest', False)
+    results = manager.check_updates(maven_central, include_recent=include_recent, recent_hours=recent_hours, force_latest=force_latest)
 
     # Categorize results
     updates = []
     pinned = []
     skipped = []
+    templated = []
     current = []
     violations = []
     too_recent = []
@@ -5367,6 +5386,8 @@ def handle_versions_command(args: argparse.Namespace) -> int:
             pinned.append(r)
         elif r['status'] == 'SKIP':
             skipped.append(r)
+        elif r['status'] == 'TEMPLATED':
+            templated.append(r)
         elif r['status'] == 'CURRENT':
             current.append(r)
         elif r['status'] == 'VIOLATE':
@@ -5424,6 +5445,8 @@ def handle_versions_command(args: argparse.Namespace) -> int:
             print(f"  [PINNED]  {name}: {curr} ({r['message']})")
         elif r['status'] == 'SKIP':
             print(f"  [SKIP]    {name}: {curr} ({r['message']})")
+        elif r['status'] == 'TEMPLATED':
+            print(f"  [TEMPL]   {name}: {curr} ({r['message']})")
         elif r['status'] == 'NOT_FOUND':
             print(f"  [SKIP]    {name}: {curr} ({r['message']})")
         elif r['status'] == 'TOO_RECENT':
@@ -5460,6 +5483,8 @@ def handle_versions_command(args: argparse.Namespace) -> int:
         summary_parts.append(f"{len(pinned)} pinned")
     if skipped:
         summary_parts.append(f"{len(skipped)} skipped")
+    if templated:
+        summary_parts.append(f"{len(templated)} templated")
     if current:
         summary_parts.append(f"{len(current)} current")
     if violations:

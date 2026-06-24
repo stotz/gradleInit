@@ -1045,6 +1045,63 @@ class TestDependenciesAndCache(unittest.TestCase):
         paths2.ensure_structure()
         self.assertFalse(paths2.cache_rebuilt)
 
+class TestVersionsForceLatest(unittest.TestCase):
+    """versions --latest must force literal entries to newest and never touch
+    templated placeholder values ({{ ... }})."""
+
+    CATALOG = (
+        '[versions]\n'
+        '# JDK version for toolchain\n'
+        'jdk = "{{ @@03|(24|25)|JDK version=25@@jdk_version }}"\n'
+        '# https://mvnrepository.com/artifact/org.jetbrains.kotlin/kotlin-stdlib {{ version_policy }}\n'
+        'kotlin = "{{ kotlin_version }}"\n'
+        '# https://mvnrepository.com/artifact/io.ktor/ktor-server-core-jvm {{ version_policy }}\n'
+        'ktor = "3.5.0"\n'
+    )
+
+    class _StubMaven:
+        def get_versions(self, g, a, limit=1, include_prerelease=False):
+            return ["9.9.9"]
+        def get_version_info(self, g, a):
+            return {"version": "9.9.9", "age_hours": 1000.0}
+        def get_latest_version(self, g, a):
+            return "9.9.9"
+        def get_matching_version(self, g, a, ct, cv, cur):
+            return "9.9.9"
+
+    def _catalog(self):
+        f = Path(tempfile.mkdtemp()) / 'libs.versions.toml'
+        f.write_text(self.CATALOG, encoding='utf-8')
+        self.addCleanup(shutil.rmtree, f.parent, ignore_errors=True)
+        return f
+
+    def _status(self, results):
+        return {r['name']: r['status'] for r in results}
+
+    def test_without_latest_literal_is_pinned(self):
+        mgr = gradleInit.VersionManager(self._catalog())
+        st = self._status(mgr.check_updates(self._StubMaven(), force_latest=False))
+        self.assertEqual(st['ktor'], 'PINNED')          # {{ version_policy }} -> implicit pin
+        self.assertEqual(st['kotlin'], 'TEMPLATED')     # placeholder value, never touched
+        self.assertEqual(st['jdk'], 'TEMPLATED')
+
+    def test_with_latest_updates_literal_only(self):
+        cat = self._catalog()
+        mgr = gradleInit.VersionManager(cat)
+        results = mgr.check_updates(self._StubMaven(), include_recent=True, force_latest=True)
+        st = self._status(results)
+        self.assertEqual(st['ktor'], 'UPDATE')
+        self.assertEqual(st['kotlin'], 'TEMPLATED')
+        self.assertEqual(st['jdk'], 'TEMPLATED')
+        # apply and confirm placeholders survive
+        for r in results:
+            if r['status'] == 'UPDATE':
+                mgr.update_version(r['name'], r['latest'])
+        txt = cat.read_text(encoding='utf-8')
+        self.assertIn('ktor = "9.9.9"', txt)
+        self.assertIn('kotlin = "{{ kotlin_version }}"', txt)
+        self.assertIn('@@jdk_version', txt)
+
 
 # ============================================================================
 # Test Runner

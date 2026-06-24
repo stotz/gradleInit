@@ -12,12 +12,12 @@
 
 
 
-## Aktueller Stand (v0048)
+## Aktueller Stand (v0050)
 
 gradleInit ist ein Python-basiertes Tool zur Generierung von Kotlin/Gradle-Projekten aus Templates.
 Verwendet Jinja2 fuer Template-Verarbeitung mit inline Hint-System.
-SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.2; die 4-stellige AI-Versionierung
-ist davon getrennt und laeuft linear (zuletzt v0048).
+SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.3; die 4-stellige AI-Versionierung
+ist davon getrennt und laeuft linear (zuletzt v0050).
 
 Hinweis zur History: Die Versionstabelle unten ist zwischen v0023 und v0024 unvollstaendig.
 Einige Features (erweiterte Hint-Syntax mit Regex, Template-Compilation-Cache) sind im Code
@@ -38,6 +38,39 @@ Hauptfeatures:
 - --latest Flag fuer @* statt @pin Version-Constraints
 
 ## Aktuelle Arbeit
+
+v0050: update_all_versions.sh nutzt versions --latest (kein @pin-sed-Hack mehr)
+
+- Problem: das alte update_all_versions.sh ersetzte per sed '@pin' durch '@*' in den
+  Kommentarzeilen. In den Templates steht die Policy aber als '{{ version_policy }}', nicht
+  '@pin' - das sed war ein No-op, der Tool-Lauf sah weiter "implicit pin" -> kein Update.
+- Fix: Script auf 'gradleInit versions --update --latest --include-recent --yes' pro Template
+  umgestellt, kein sed mehr. --latest erzwingt die neueste Version fuer literale Eintraege;
+  Platzhalter (kotlin, jdk) bleiben unangetastet. Neu: PATH-Check fuer gradleInit, Guard auf
+  Vorhandensein von '--latest' (>= 1.12.4), '--dry-run' (nur Vorschau), Zusammenfassung.
+- Verifiziert mit Stub-gradleInit: alle 6 Templates werden mit korrekten Flags durchlaufen.
+- Setzt gradleInit v0049 (versions --latest) voraus.
+- Betroffenes Repo: gradleInitTemplates (update_all_versions.sh).
+
+v0049: versions --latest (Force-Modus) zum Aktualisieren der Template-Kataloge
+
+- Problem: 'gradleInit versions --update' auf einen rohen Template-Katalog meldet alle
+  Libs als [PINNED] und aendert nichts. Ursache: die Policy steht dort als unrendered
+  Platzhalter '{{ version_policy }}'; URL_PATTERN erfasst als Constraint nur literales
+  '@...', also ist die Constraint None -> "implicit pin" -> kein Update.
+- Fix: neues Flag 'versions --latest'. Es behandelt jeden URL-gestuetzten, literalen
+  Eintrag als @* (ueberschreibt @pin/implicit-pin) und aktualisiert auf die neueste
+  stabile Version. Eintraege mit Platzhalter-Wert ('{{ kotlin_version }}', JDK-Hint)
+  werden als [TEMPL] uebersprungen und nie zu einem Literal umgeschrieben.
+- Damit aktualisiert 'gradleInit versions --update --latest --include-recent' pro Template
+  die literalen Lib-Versionen (shadow, clikt, ktor, logback, spring-boot, junit, assertj,
+  mockk, javafx, ...) auf neueste, waehrend kotlin/jdk Platzhalter bleiben.
+- Hinweis: kotlin/gradle/jdk sind Tool-Defaults (DEFAULT_PROJECT_DEFAULTS /
+  DEFAULT_GRADLE_VERSION / JDK-Hint), kein Maven-Central-Lookup; sie werden ueber die
+  gradleInit-Konstanten + version_sync gepflegt, nicht ueber 'versions'.
+- Tests: TestVersionsForceLatest (ohne --latest literal=PINNED, Platzhalter=TEMPLATED;
+  mit --latest literal=UPDATE, Platzhalter unangetastet inkl. Write-Back-Pruefung).
+- Betroffenes Repo: gradleInit (gradleInit.py, test_gradleInit.py).
 
 v0048: multiproject-root Katalog auf minimale Basis reduziert
 
