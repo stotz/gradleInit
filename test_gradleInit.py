@@ -1102,6 +1102,42 @@ class TestVersionsForceLatest(unittest.TestCase):
         self.assertIn('kotlin = "{{ kotlin_version }}"', txt)
         self.assertIn('@@jdk_version', txt)
 
+class TestVersionPolicyResolution(unittest.TestCase):
+    """--version_policy must take effect (explicit > --latest > default @pin),
+    accept friendly aliases, and reject invalid values."""
+
+    def test_normalize(self):
+        self.assertEqual(gradleInit.normalize_version_policy('@*'), '@*')
+        self.assertEqual(gradleInit.normalize_version_policy('*'), '@*')
+        self.assertEqual(gradleInit.normalize_version_policy('pin'), '@pin')
+        self.assertEqual(gradleInit.normalize_version_policy('latest'), '@*')
+        self.assertEqual(gradleInit.normalize_version_policy('minor'), '@^')
+        self.assertEqual(gradleInit.normalize_version_policy('patch'), '@~')
+        self.assertEqual(gradleInit.normalize_version_policy('@^1.2.3'), '@^1.2.3')
+        self.assertEqual(gradleInit.normalize_version_policy('>=1.0.0'), '@>=1.0.0')
+        self.assertIsNone(gradleInit.normalize_version_policy('garbage'))
+        self.assertIsNone(gradleInit.normalize_version_policy(''))
+        self.assertIsNone(gradleInit.normalize_version_policy(None))
+
+    def _ns(self, **kw):
+        import argparse
+        n = argparse.Namespace()
+        for k, v in kw.items():
+            setattr(n, k, v)
+        return n
+
+    def test_resolve_precedence(self):
+        # explicit --version_policy wins over --latest
+        self.assertEqual(gradleInit.resolve_version_policy(self._ns(version_policy='@^', latest=True)), '@^')
+        # --latest -> @*
+        self.assertEqual(gradleInit.resolve_version_policy(self._ns(version_policy=None, latest=True)), '@*')
+        # default -> @pin
+        self.assertEqual(gradleInit.resolve_version_policy(self._ns(version_policy=None, latest=False)), '@pin')
+        # friendly alias
+        self.assertEqual(gradleInit.resolve_version_policy(self._ns(version_policy='latest', latest=False)), '@*')
+        # invalid explicit -> None (handler turns this into an error)
+        self.assertIsNone(gradleInit.resolve_version_policy(self._ns(version_policy='nope', latest=False)))
+
 
 # ============================================================================
 # Test Runner

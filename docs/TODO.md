@@ -12,12 +12,12 @@
 
 
 
-## Aktueller Stand (v0050)
+## Aktueller Stand (v0052)
 
 gradleInit ist ein Python-basiertes Tool zur Generierung von Kotlin/Gradle-Projekten aus Templates.
 Verwendet Jinja2 fuer Template-Verarbeitung mit inline Hint-System.
-SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.3; die 4-stellige AI-Versionierung
-ist davon getrennt und laeuft linear (zuletzt v0050).
+SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.4; die 4-stellige AI-Versionierung
+ist davon getrennt und laeuft linear (zuletzt v0052).
 
 Hinweis zur History: Die Versionstabelle unten ist zwischen v0023 und v0024 unvollstaendig.
 Einige Features (erweiterte Hint-Syntax mit Regex, Template-Compilation-Cache) sind im Code
@@ -38,6 +38,33 @@ Hauptfeatures:
 - --latest Flag fuer @* statt @pin Version-Constraints
 
 ## Aktuelle Arbeit
+
+v0052: --latest (und --version_policy) explizit in der init/subproject-Hilfe
+
+- Problem: 'gradleInit init -h' zeigte --latest nicht. Es gibt mehrere hartcodierte
+  init-Hilfe-Bloecke; der fuer 'init -h' (ohne Projektname) gezeigte listete nur
+  --group/--project-version/--gradle/--kotlin/--jdk/--interactive. Mit Template tauchte
+  "latest" nur zufaellig im --version_policy-Hilfetext auf, nicht als eigenes Flag.
+- Fix: --latest, --version_policy und --dry-run explizit in allen init-Hilfe-Bloecken
+  ergaenzt (frueher No-Name-Block, generischer Block, Template-Pfad via "Common options")
+  sowie in der subproject-Hilfe. Veralteter JDK-Hinweis "11, 17, 21" auf "24, 25" korrigiert.
+- Reine Hilfe-/Print-Aenderung, keine Logikaenderung.
+- Betroffenes Repo: gradleInit (gradleInit.py).
+
+v0051: --version_policy wirkt jetzt (war wirkungslos) + bessere Hilfe
+
+- Problem: --version_policy (automatisch aus dem {{ version_policy }}-Platzhalter erzeugt)
+  wurde nach build_context bedingungslos aus --latest ueberschrieben (@* bzw. @pin) -> ein
+  explizites --version_policy hatte keine Wirkung. Zudem war die Hilfe nur "Set
+  version_policy" ohne erlaubte Werte.
+- Fix: Praezedenz explizit --version_policy > --latest (@*) > Default (@pin), in init und
+  subproject. Helper normalize_version_policy (akzeptiert @-Token plus freundliche Woerter
+  pin/latest/minor/patch, mit/ohne @) und resolve_version_policy. Ungueltige Werte werden mit
+  klarer Meldung abgelehnt (Exit 1) statt still in den Katalog geschrieben.
+- Hilfe: --version_policy hat jetzt eine kuratierte Beschreibung (Quelle: get_arguments) und
+  Metavar POLICY; nennt @pin/@*/@^/@~/Ranges und den Hinweis --latest = @*.
+- Tests: TestVersionPolicyResolution (Normalisierung, Praezedenz, Alias, ungueltig).
+- Betroffenes Repo: gradleInit (gradleInit.py, test_gradleInit.py).
 
 v0050: update_all_versions.sh nutzt versions --latest (kein @pin-sed-Hack mehr)
 

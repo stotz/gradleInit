@@ -8,7 +8,7 @@ Architecture: Core + Optional Modules
 - Git required for templates (already a requirement)
 - Modules auto-download on demand
 
-Version: 1.12.4
+Version: 1.12.1
 Author: Urs Stotz
 License: MIT
 """
@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple, Any
 # Version & Constants
 # ============================================================================
 
-SCRIPT_VERSION = "1.12.4"
+SCRIPT_VERSION = "1.12.1"
 MODULES_REPO = "https://github.com/stotz/gradleInitModules.git"
 TEMPLATES_REPO = "https://github.com/stotz/gradleInitTemplates.git"
 SELF_REPO = "https://github.com/stotz/gradleInit.git"
@@ -2761,11 +2761,22 @@ class TemplateMetadata:
         seen_names = set()
 
         # First, add variables from inline hints
+        _VERSION_POLICY_HELP = (
+            'Version-update policy for catalog libraries: @pin (never, default), '
+            '@* (latest), @^ (minor), @~ (patch), or a range like @>=1.0.0. '
+            'Shortcut: --latest = @*. Quote it, e.g. "@*".'
+        )
         for var in self.hint_parser.get_sorted_variables():
+            if var.name == 'version_policy':
+                _help = _VERSION_POLICY_HELP
+            elif var.is_enhanced:
+                _help = var.help_text
+            else:
+                _help = f"Set {var.name}"
             arguments.append(TemplateArgument(
                 name=var.name,
                 type='string',
-                help=var.help_text if var.is_enhanced else f"Set {var.name}",
+                help=_help,
                 context_key=var.name,
                 default=var.default_value,  # Use default from hint
                 choices=None,
@@ -3111,6 +3122,11 @@ class DynamicCLIBuilder:
             elif arg.type == 'integer':
                 kwargs['type'] = int
                 # Don't set default - let ContextBuilder handle it with proper priority
+
+            # version_policy carries a curated help from get_arguments(); just
+            # give it a clean metavar for the usage line.
+            if arg.name == 'version_policy':
+                kwargs['metavar'] = 'POLICY'
 
             if arg.required:
                 kwargs['required'] = True
@@ -4653,6 +4669,38 @@ def find_gradle_root(start_path: Path = None) -> Optional[Path]:
     return None
 
 
+def normalize_version_policy(value: Optional[str]) -> Optional[str]:
+    """Normalize a --version_policy value to an '@'-prefixed catalog policy token.
+
+    Accepts friendly words (pin, latest, minor, patch) and bare tokens (with or
+    without '@'). Returns the normalized '@...' token, or None if the value is
+    not a valid constraint. Valid: @pin, @*, @^, @~, @^1.2.3, @~1.2.3,
+    @>=1.0.0, @<2.0.0, @1.x, ...
+    """
+    if value is None:
+        return None
+    v = value.strip()
+    if not v:
+        return None
+    v = {'pin': '@pin', 'latest': '@*', 'minor': '@^', 'patch': '@~'}.get(v.lower(), v)
+    if not v.startswith('@'):
+        v = '@' + v
+    ctype, _ = VersionConstraintChecker.parse_constraint(v[1:])
+    return v if ctype != 'unknown' else None
+
+
+def resolve_version_policy(args: argparse.Namespace) -> Optional[str]:
+    """Resolve the effective version policy with precedence:
+    explicit --version_policy > --latest (@*) > default (@pin).
+
+    Returns the '@...' token, or None if an explicit value was invalid.
+    """
+    raw = getattr(args, 'version_policy', None)
+    if raw:
+        return normalize_version_policy(raw)
+    return '@*' if getattr(args, 'latest', False) else '@pin'
+
+
 def handle_init_command(args: argparse.Namespace,
                         paths: GradleInitPaths,
                         repo_manager: TemplateRepositoryManager) -> int:
@@ -4682,9 +4730,14 @@ def handle_init_command(args: argparse.Namespace,
             print("Options:")
             print("  --group GROUP             Group ID (default: com.example)")
             print("  --project-version VER     Project version (default: 1.0.0)")
-            print("  --gradle-version VER      Gradle version to use")
+            print("  --gradle-version VER      Gradle version to use (or 'latest')")
             print("  --kotlin-version VER      Kotlin version to use")
-            print("  --jdk-version VER         JDK version (11, 17, 21)")
+            print("  --jdk-version VER         JDK version (e.g. 24, 25)")
+            print("  --version_policy POLICY   Catalog update policy: @pin (default), @*, @^,")
+            print("                            @~, or a range like @>=1.0.0")
+            print("  --latest                  Shortcut for --version_policy @* (track newest)")
+            print("  --config KEY=VALUE        Set template configuration")
+            print("  --dry-run                 Show what would be created, change nothing")
             print("  --interactive             Interactive mode with prompts")
             print("  --no-interactive          Non-interactive mode (default)")
             print()
@@ -4792,6 +4845,18 @@ def handle_init_command(args: argparse.Namespace,
                     print(f"      {arg.help}{required_str}{default_str}")
                 print()
 
+            # Common options that apply regardless of template
+            print("Common options:")
+            print("  --group GROUP             Maven group ID")
+            print("  --project-version VERSION Project version")
+            print("  --gradle-version VERSION  Gradle version (or 'latest')")
+            print("  --kotlin-version VERSION  Kotlin version")
+            print("  --jdk-version VERSION     JDK version")
+            print("  --latest                  Shortcut for --version_policy @* (track newest)")
+            print("  --dry-run                 Show what would be created, change nothing")
+            print("  --interactive, -i         Prompt for missing values")
+            print()
+
             # Show requirements if any
             requirements = metadata.metadata.get('requirements', {})
             if requirements:
@@ -4814,7 +4879,15 @@ def handle_init_command(args: argparse.Namespace,
             print("Optional Arguments:")
             print("  --group GROUP             Maven group ID (e.g., com.example)")
             print("  --project-version VERSION Project version (e.g., 0.1.0)")
+            print("  --gradle-version VERSION  Gradle version (or 'latest')")
+            print("  --kotlin-version VERSION  Kotlin version")
+            print("  --jdk-version VERSION     JDK version")
+            print("  --version_policy POLICY   Catalog update policy: @pin (default), @*, @^,")
+            print("                            @~, or a range like @>=1.0.0")
+            print("  --latest                  Shortcut for --version_policy @* (track newest)")
             print("  --config KEY=VALUE        Set template configuration")
+            print("  --dry-run                 Show what would be created, change nothing")
+            print("  --interactive, -i         Prompt for missing values")
             print()
             print("Available Templates:")
             print("  kotlin-single      Simple single-module Kotlin project")
@@ -4989,8 +5062,14 @@ def handle_init_command(args: argparse.Namespace,
         )
         context = context_builder.build_context()
 
-        # Set version_policy based on --latest flag
-        context['version_policy'] = '@*' if getattr(args, 'latest', False) else '@pin'
+        # version_policy precedence: explicit --version_policy > --latest (@*) > default (@pin)
+        _vp = resolve_version_policy(args)
+        if _vp is None:
+            print_error("Invalid --version_policy '{}'. Use @pin, @*, @^, @~ or a range like "
+                        "@>=1.0.0 (also accepts: pin, latest, minor, patch).".format(
+                            getattr(args, 'version_policy', '')))
+            return 1
+        context['version_policy'] = _vp
 
         # Ensure required version variables are never empty. Older config files may
         # predate these defaults (key missing) or carry a blank value, and templates
@@ -5136,6 +5215,9 @@ def handle_subproject_command(args: argparse.Namespace,
         print()
         print("Options:")
         print("  --group, -g GROUP     Override group ID")
+        print("  --version_policy POLICY  Catalog update policy for merged libs: @pin (default),")
+        print("                           @*, @^, @~, or a range like @>=1.0.0")
+        print("  --latest              Shortcut for --version_policy @* (track newest)")
         print("  --config KEY=VALUE    Set configuration value (can be used multiple times)")
         print("  --interactive, -i     Interactive mode")
         print()
@@ -5228,8 +5310,14 @@ def handle_subproject_command(args: argparse.Namespace,
             if prompted:
                 context[hint.name] = prompted
 
-    # Set version_policy based on --latest flag
-    context['version_policy'] = '@*' if getattr(args, 'latest', False) else '@pin'
+    # version_policy precedence: explicit --version_policy > --latest (@*) > default (@pin)
+    _vp = resolve_version_policy(args)
+    if _vp is None:
+        print_error("Invalid --version_policy '{}'. Use @pin, @*, @^, @~ or a range like "
+                    "@>=1.0.0 (also accepts: pin, latest, minor, patch).".format(
+                        getattr(args, 'version_policy', '')))
+        return 1
+    context['version_policy'] = _vp
 
     # Ensure required version variables are never empty (older config files may
     # lack the defaults or carry blank values).
