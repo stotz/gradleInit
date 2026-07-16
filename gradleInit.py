@@ -8,7 +8,7 @@ Architecture: Core + Optional Modules
 - Git required for templates (already a requirement)
 - Modules auto-download on demand
 
-Version: 1.12.5
+Version: 1.12.6
 Author: Urs Stotz
 License: MIT
 """
