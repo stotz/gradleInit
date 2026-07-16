@@ -46,7 +46,7 @@ SCOOP_DIR = os.environ.get('SCOOP')
 SCOOP_SHIMS_DIR = os.path.join(SCOOP_DIR, 'shims') if SCOOP_DIR else None
 
 # Default Gradle version
-DEFAULT_GRADLE_VERSION = "9.5.1"
+DEFAULT_GRADLE_VERSION = "9.6.1"
 GRADLE_VERSIONS_URL = "https://services.gradle.org/versions/all"
 
 # Default project values for a fresh config; also used as fallbacks when an older
@@ -56,7 +56,7 @@ DEFAULT_PROJECT_DEFAULTS = {
     'group': 'com.example',
     'version': '0.1.0',
     'gradle_version': DEFAULT_GRADLE_VERSION,
-    'kotlin_version': '2.4.0',
+    'kotlin_version': '2.4.10',
     'jdk_version': '25',
 }
 
@@ -350,6 +350,18 @@ def _normalize_text_bytes(data: bytes) -> bytes:
     if b"\x00" in data:
         return data
     return data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+
+def write_text_lf(path: Path, content: str, encoding: str = 'utf-8') -> None:
+    """Write text using LF line endings on every platform.
+
+    Path.write_text() opens in text mode, so on Windows Python rewrites every
+    '\\n' to '\\r\\n'. That silently turned LF files (e.g. gradle/libs.versions.toml)
+    into CRLF whenever gradleInit rewrote them. Writing bytes bypasses the
+    translation, so generated and updated files stay LF regardless of platform.
+    """
+    normalized = content.replace('\r\n', '\n').replace('\r', '\n')
+    path.write_bytes(normalized.encode(encoding))
 
 
 class RepositorySecurity:
@@ -973,11 +985,13 @@ python3 {script_path_unix} "$@"
     try:
         # Write CMD shim
         print_info(f"Creating: {cmd_shim}")
-        cmd_shim.write_text(cmd_content, encoding='utf-8')
+        # Windows batch files are CRLF by convention; write it explicitly so the
+        # result does not depend on the platform running gradleInit.
+        cmd_shim.write_bytes(cmd_content.replace('\r\n', '\n').replace('\n', '\r\n').encode('utf-8'))
 
         # Write shell shim
         print_info(f"Creating: {sh_shim}")
-        sh_shim.write_text(sh_content, encoding='utf-8')
+        write_text_lf(sh_shim, sh_content)
 
         # Make shell shim executable (doesn't hurt on Windows)
         try:
@@ -1194,7 +1208,7 @@ class GradleInitPaths:
                 except OSError:
                     pass
         try:
-            marker.write_text(SCRIPT_VERSION, encoding='utf-8')
+            write_text_lf(marker, SCRIPT_VERSION)
         except OSError:
             pass
         # Only report a rebuild for an actual version change, not first run.
@@ -1225,7 +1239,7 @@ class GradleInitPaths:
             }
         }
 
-        self.config_file.write_text(toml.dumps(default_config))
+        write_text_lf(self.config_file, toml.dumps(default_config))
         print_success(f"Created default config: {self.config_file}")
 
 
@@ -1931,7 +1945,7 @@ class VersionManager:
         lines[line_idx] = new_line
 
         # Write back
-        self.toml_path.write_text('\n'.join(lines), encoding='utf-8')
+        write_text_lf(self.toml_path, '\n'.join(lines))
 
         # Update entry
         entry.current_version = new_version
@@ -2700,7 +2714,7 @@ class TemplateMetadata:
         # Cache compiled content
         try:
             compiled_file.parent.mkdir(parents=True, exist_ok=True)
-            compiled_file.write_text(compiled_content, encoding='utf-8')
+            write_text_lf(compiled_file, compiled_content)
         except OSError:
             # Failed to cache, but we have compiled content
             pass
@@ -3601,7 +3615,7 @@ class ProjectGenerator:
                 content = template.render(**self.context)
 
             # Write rendered content
-            target_file.write_text(content, encoding='utf-8')
+            write_text_lf(target_file, content)
 
             print_info(f"  [OK] {rel_path}")
 
@@ -3793,13 +3807,13 @@ class ProjectGenerator:
                 build_file.touch()
             else:
                 # Temporarily replace with empty file
-                build_file.write_text("")
+                write_text_lf(build_file, "")
 
             if not settings_existed:
                 settings_file.touch()
             else:
                 # Temporarily replace with empty file
-                settings_file.write_text("")
+                write_text_lf(settings_file, "")
 
             # Step 1.5: Stop Gradle daemon to clear cached Kotlin DSL
             # This is CRITICAL to avoid Constructor errors from cached compilations
@@ -3856,12 +3870,12 @@ class ProjectGenerator:
 
                 # Step 3: Restore original files or delete placeholders
                 if build_existed and build_content:
-                    build_file.write_text(build_content)
+                    write_text_lf(build_file, build_content)
                 elif not build_existed:
                     build_file.unlink()
 
                 if settings_existed and settings_content:
-                    settings_file.write_text(settings_content)
+                    write_text_lf(settings_file, settings_content)
                 elif not settings_existed:
                     settings_file.unlink()
             else:
@@ -3870,9 +3884,9 @@ class ProjectGenerator:
 
                 # Restore original files on failure
                 if build_existed and build_content:
-                    build_file.write_text(build_content)
+                    write_text_lf(build_file, build_content)
                 if settings_existed and settings_content:
-                    settings_file.write_text(settings_content)
+                    write_text_lf(settings_file, settings_content)
 
         except FileNotFoundError as e:
             print_warning(f"Gradle not found in PATH: {e}")
@@ -3882,9 +3896,9 @@ class ProjectGenerator:
 
             # Restore original files on error
             if build_existed and build_content:
-                build_file.write_text(build_content)
+                write_text_lf(build_file, build_content)
             if settings_existed and settings_content:
-                settings_file.write_text(settings_content)
+                write_text_lf(settings_file, settings_content)
 
         except subprocess.TimeoutExpired:
             print_warning("Gradle wrapper generation timed out (60s)")
@@ -3893,9 +3907,9 @@ class ProjectGenerator:
 
             # Restore original files on error
             if build_existed and build_content:
-                build_file.write_text(build_content)
+                write_text_lf(build_file, build_content)
             if settings_existed and settings_content:
-                settings_file.write_text(settings_content)
+                write_text_lf(settings_file, settings_content)
 
         except Exception as e:
             print_warning(f"Unexpected error: {e}")
@@ -3904,9 +3918,9 @@ class ProjectGenerator:
 
             # Restore original files on error
             if build_existed and build_content:
-                build_file.write_text(build_content)
+                write_text_lf(build_file, build_content)
             if settings_existed and settings_content:
-                settings_file.write_text(settings_content)
+                write_text_lf(settings_file, settings_content)
 
 
 # ============================================================================
@@ -4084,7 +4098,7 @@ class SubprojectGenerator:
                 template = self.jinja_env.get_template(rel_path)
 
             content = template.render(**self.context)
-            target_file.write_text(content, encoding='utf-8')
+            write_text_lf(target_file, content)
 
             rel_path = source_file.relative_to(self.template_path)
             print_info(f"  [OK] {rel_path}")
@@ -4106,7 +4120,7 @@ class SubprojectGenerator:
             compiled_content = self.template_metadata.compile_template_file(source_file)
             template = self.jinja_env.from_string(compiled_content)
             content = template.render(**self.context)
-            target_file.write_text(content, encoding='utf-8')
+            write_text_lf(target_file, content)
             print_info(f"  [OK] build.gradle.kts (from {self.build_file})")
         except Exception as e:
             print_error(f"Error rendering {self.build_file}: {e}")
@@ -4165,7 +4179,7 @@ class SubprojectGenerator:
             merged = self._merge_toml_content(root_content, template_content)
 
             if merged != root_content:
-                root_versions.write_text(merged, encoding='utf-8')
+                write_text_lf(root_versions, merged)
                 print_info("  [OK] Merged versions into gradle/libs.versions.toml")
             else:
                 print_info("  [--] No new versions to merge")
@@ -4278,7 +4292,7 @@ class SubprojectGenerator:
             content += '\n'
         content += f'{include_line}\n'
 
-        settings_file.write_text(content, encoding='utf-8')
+        write_text_lf(settings_file, content)
         print_info(f"  [OK] Added include(\"{self.subproject_name}\") to settings.gradle.kts")
 
     def _git_add(self):
@@ -5611,8 +5625,8 @@ def handle_versions_command(args: argparse.Namespace) -> int:
             new_version = gradle_update['latest']
             try:
                 props_text = gradle_props.read_text(encoding='utf-8')
-                gradle_props.write_text(
-                    _rewrite_distribution_url(props_text, new_version), encoding='utf-8')
+                write_text_lf(gradle_props,
+                              _rewrite_distribution_url(props_text, new_version))
                 print_success(f"Updated gradle: {gradle_update['current']} -> {new_version}")
             except Exception as e:
                 print_error(f"Failed to update gradle: {e}")
@@ -5914,7 +5928,7 @@ def save_config(config_file: Path, config: Dict[str, Any]):
                     lines.append(f'{key} = {value}')
         lines.append('')
 
-    config_file.write_text('\n'.join(lines), encoding='utf-8')
+    write_text_lf(config_file, '\n'.join(lines))
 
 
 # ============================================================================

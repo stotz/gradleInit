@@ -1138,6 +1138,49 @@ class TestVersionPolicyResolution(unittest.TestCase):
         # invalid explicit -> None (handler turns this into an error)
         self.assertIsNone(gradleInit.resolve_version_policy(self._ns(version_policy='nope', latest=False)))
 
+class TestLineEndings(unittest.TestCase):
+    """gradleInit must never write CRLF: generated files are LF, and rewriting an
+    existing file must not flip LF to CRLF (Path.write_text does that on Windows)."""
+
+    def _tmp(self):
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        return d
+
+    def test_write_text_lf_normalizes(self):
+        f = self._tmp() / 'out.txt'
+        gradleInit.write_text_lf(f, 'a\r\nb\rc\nd')
+        self.assertEqual(f.read_bytes(), b'a\nb\nc\nd')
+
+    def test_update_version_keeps_lf(self):
+        f = self._tmp() / 'libs.versions.toml'
+        f.write_bytes(b'[versions]\n'
+                      b'# https://mvnrepository.com/artifact/io.ktor/ktor-server-core-jvm @*\n'
+                      b'ktor = "3.5.0"\n')
+        gradleInit.VersionManager(f).update_version('ktor', '3.5.1')
+        data = f.read_bytes()
+        self.assertNotIn(b'\r\n', data)
+        self.assertIn(b'ktor = "3.5.1"', data)
+
+    def test_update_version_converts_crlf_to_lf(self):
+        f = self._tmp() / 'libs.versions.toml'
+        f.write_bytes(b'[versions]\r\n'
+                      b'# https://mvnrepository.com/artifact/io.ktor/ktor-server-core-jvm @*\r\n'
+                      b'ktor = "3.5.0"\r\n')
+        gradleInit.VersionManager(f).update_version('ktor', '3.5.1')
+        data = f.read_bytes()
+        self.assertNotIn(b'\r', data)
+        self.assertIn(b'ktor = "3.5.1"', data)
+
+    def test_no_raw_write_text_in_source(self):
+        # Guard: every text write must go through write_text_lf (the .cmd shim
+        # writes bytes explicitly and is exempt).
+        src = Path(gradleInit.__file__).read_text(encoding='utf-8')
+        offenders = [ln.strip() for ln in src.splitlines()
+                     if '.write_text(' in ln and not ln.strip().startswith('#')
+                     and 'Path.write_text()' not in ln]
+        self.assertEqual(offenders, [], f"raw write_text found: {offenders}")
+
 
 # ============================================================================
 # Test Runner

@@ -12,12 +12,12 @@
 
 
 
-## Aktueller Stand (v0052)
+## Aktueller Stand (v0054)
 
 gradleInit ist ein Python-basiertes Tool zur Generierung von Kotlin/Gradle-Projekten aus Templates.
 Verwendet Jinja2 fuer Template-Verarbeitung mit inline Hint-System.
-SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.4; die 4-stellige AI-Versionierung
-ist davon getrennt und laeuft linear (zuletzt v0052).
+SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.5; die 4-stellige AI-Versionierung
+ist davon getrennt und laeuft linear (zuletzt v0054).
 
 Hinweis zur History: Die Versionstabelle unten ist zwischen v0023 und v0024 unvollstaendig.
 Einige Features (erweiterte Hint-Syntax mit Regex, Template-Compilation-Cache) sind im Code
@@ -38,6 +38,44 @@ Hauptfeatures:
 - --latest Flag fuer @* statt @pin Version-Constraints
 
 ## Aktuelle Arbeit
+
+v0054: update_all_versions.sh auf version_sync umgebogen (ein Weg zur SSoT)
+
+- Problem: das Script (v0050) rief 'gradleInit versions --update --latest' direkt auf den
+  Template-Katalogen auf und umging damit die SSoT
+  (gradleInit/versions/gradle/libs.versions.toml). Folge: Drift - Templates hatten
+  logback 1.5.35 / spring-boot 4.1.0, die SSoT 1.5.34 / 4.0.6; 'version_sync --check' und
+  zwei test_version_sync-Tests waren rot.
+- Fix: update_all_versions.sh ist jetzt ein duenner Wrapper um tools/version_sync.py und
+  faehrt die Sequenz --update (SSoT anheben, im Rahmen der Constraint je Eintrag) ->
+  --apply (Templates, Tool-Defaults, READMEs schreiben) -> --check (verifizieren). Kein
+  direkter Zugriff mehr auf Template-Kataloge, kein --latest-Force-Pfad.
+  Optionen: --check (read-only), --yes, --include-recent. Guards: python-Interpreter,
+  Vorhandensein des gradleInit-Nachbar-Repos, unbekannte Optionen.
+- SSoT-Kommentar korrigiert: die per-Eintrag-Policy wird von --update sehr wohl konsumiert
+  (run_update nutzt VersionManager.check_updates); der Hinweis "nur --check implementiert"
+  war veraltet.
+- Verifiziert: --check meldet die Drift; SSoT-Bump + --apply konvergiert auf gruen und
+  haelt LF; Guards greifen. ('--update' braucht Maven-Central-Netz, im Sandbox blockiert.)
+- Betroffene Repos: gradleInitTemplates (update_all_versions.sh),
+  gradleInit (versions/gradle/libs.versions.toml Kommentar).
+
+v0053: Zeilenenden immer LF (kein LF -> CRLF mehr beim Schreiben)
+
+- Problem: nach 'versions --update' hatte gradle/libs.versions.toml CRLF statt LF.
+  Ursache: Path.write_text() oeffnet im Textmodus; unter Windows uebersetzt Python dabei
+  jedes '\n' zu '\r\n'. Das betraf nicht nur den versions-Update, sondern jede
+  geschriebene Datei (Template-Rendering, settings/build.gradle.kts, Katalog-Merge,
+  gradle.properties, Config, Compiled-Cache) - generierte Projekte waren unter Windows
+  durchgehend CRLF.
+- Fix: neuer Helper write_text_lf(path, content) schreibt Bytes mit LF (analog zur
+  bestehenden _normalize_text_bytes-Konvention beim Signieren). Alle 25 Text-Schreibstellen
+  darauf umgestellt. Bestehende CRLF-Dateien werden beim Rewrite auf LF normalisiert.
+  Ausnahme: der Windows-.cmd-Shim wird bewusst explizit als CRLF geschrieben (Batch-
+  Konvention), plattformunabhaengig statt vom Zufall abhaengig.
+- Tests: TestLineEndings (Helper normalisiert; update_version haelt LF; CRLF-Eingabe wird
+  zu LF; Quellcode-Guard: kein rohes write_text mehr im Code).
+- Betroffenes Repo: gradleInit (gradleInit.py, test_gradleInit.py).
 
 v0052: --latest (und --version_policy) explizit in der init/subproject-Hilfe
 
