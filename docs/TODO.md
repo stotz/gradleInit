@@ -12,12 +12,12 @@
 
 
 
-## Aktueller Stand (v0060)
+## Aktueller Stand (v0062)
 
 gradleInit ist ein Python-basiertes Tool zur Generierung von Kotlin/Gradle-Projekten aus Templates.
 Verwendet Jinja2 fuer Template-Verarbeitung mit inline Hint-System.
-SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.6; die 4-stellige AI-Versionierung
-ist davon getrennt und laeuft linear (zuletzt v0060).
+SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.7; die 4-stellige AI-Versionierung
+ist davon getrennt und laeuft linear (zuletzt v0062).
 
 Hinweis zur History: Die Versionstabelle unten ist zwischen v0023 und v0024 unvollstaendig.
 Einige Features (erweiterte Hint-Syntax mit Regex, Template-Compilation-Cache) sind im Code
@@ -38,6 +38,48 @@ Hauptfeatures:
 - --latest Flag fuer @* statt @pin Version-Constraints
 
 ## Aktuelle Arbeit
+
+v0062: Selfupdate-Pull mit Terminal (SSH-Passphrase-Prompt) + Live-Bestaetigung Audit
+
+- Befund aus '--update all' auf bootes: der gradleInit-Selfupdate rief
+  'git pull --ff-only' mit capture_output auf. Ohne Terminal kann ssh keine
+  Key-Passphrase abfragen -> aus einem passphrase-geschuetzten Key wird
+  "Permission denied (publickey)". (Templates/Modules liefen, weil sie ueber HTTPS
+  anonym gelesen werden.) Mit geladenem ssh-agent lief der Pull dann durch - der
+  Fix haertet den Fall OHNE Agent.
+- Fix: der Pull laeuft jetzt mit geerbtem stdio (Prompts moeglich, git-Ausgabe direkt
+  sichtbar); im Fehlerfall nennt die Meldung die typischen Ursachen inkl. konkreter
+  Kommandos (ssh-agent/ssh-add bzw. remote set-url auf HTTPS).
+- Live-Bestaetigung der v0057-v0061-Kette auf bootes: nach 'gradleInit modules
+  --update' zeigt der dias-Audit korrekt [SWITCH] beryx_jlink -> Portal 4.1.0
+  (12 ok, 1 switch, 0 unknown) - der Detektor arbeitet gegen die echten Registries.
+- Tests: TestSelfUpdateGitInteractive (Pull ohne capture_output; Fehlerpfad nennt
+  ssh-add-Hinweis). Suite 149 passed.
+- Betroffenes Repo: gradleInit (gradleInit.py, test_gradleInit.py).
+
+v0061: Audit unterscheidet "Resolver fehlt" von "Artefakt existiert nicht"
+
+- Befund aus dem ersten Real-Lauf auf bootes (dias-Projekt): beryx_jlink erschien als
+  "[??] not found on either registry", obwohl das Plugin auf dem Portal liegt. Ursache
+  auf der Maschine: das Portal-Resolver-Modul (v1.12.7) war lokal nicht installiert
+  (erkennbar auch daran, dass die NOT_FOUND-Meldung von versions --update keinen
+  Portal-Hint trug). Der Audit behauptete jedoch, beide Registries geprueft zu haben.
+- Fix: audit_version_sources unterscheidet jetzt Resolver-Verfuegbarkeit von echter
+  Abwesenheit. Meldungen nennen die Ursache ("Gradle Plugin Portal resolver not
+  installed - run: gradleInit modules --update"). Sicherheitsregel: fehlt der Resolver
+  der KONFIGURIERTEN Quelle, wird nie ein SWITCH auf die andere Registry empfohlen
+  (die koennte ein stale Spiegel sein) - stattdessen UNKNOWN mit "authority unverified".
+  Schlusszeile sagt bei verbleibenden UNKNOWNs nicht mehr "all sources authoritative".
+- Verifiziert: bootes-Fall nachgestellt (ohne Portal-Resolver: klare UNKNOWN-Meldungen;
+  mit Resolver: beryx SWITCH mit Portal-URL, cyclonedx OK mit "mirror behind").
+- Tests: TestAuditSources um Verfuegbarkeits-Faelle erweitert (kein falsches
+  "not found on either", kein SWITCH auf unverifizierte Quelle). Suite 147 passed.
+- Hinweise fuer die Maschinen: 'gradleInit modules --update' installiert den
+  Portal-Resolver; danach zeigt der dias-Audit fuer beryx_jlink den SWITCH mit
+  https://plugins.gradle.org/plugin/org.beryx.jlink (Katalog dort auf Portal-URL +
+  4.1.0 stellen). Nebenbefund aus dem Lauf: SSoT hinkt inzwischen (shadow 9.6.1,
+  javafx 26.0.2) -> naechster update_all_versions.sh-Lauf zieht Templates nach.
+- Betroffenes Repo: gradleInit (gradleInit.py, test_gradleInit.py).
 
 v0060: versions --audit-sources und version_sync --audit (Beide-Quellen-Vergleich)
 

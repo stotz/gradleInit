@@ -1365,6 +1365,109 @@ class TestAuditSources(unittest.TestCase):
         findings = [r for r in by.values() if r['verdict'] in ('SWITCH', 'STALE')]
         self.assertEqual(len(findings), 3)
 
+    def _audit_no_portal(self):
+        f = Path(tempfile.mkdtemp()) / 'libs.versions.toml'
+        f.write_text(
+            '[versions]\n'
+            '# https://mvnrepository.com/artifact/org.gone/org.gone.gradle.plugin @*\n'
+            'gone = "3.1.5"\n'
+            '# https://plugins.gradle.org/plugin/org.cyclonedx.bom @*\n'
+            'cdx = "3.3.0"\n', encoding='utf-8')
+        self.addCleanup(shutil.rmtree, f.parent, ignore_errors=True)
+        res = gradleInit.audit_version_sources(
+            gradleInit.VersionManager(f), self._Maven(), None)
+        return {r['name']: r for r in res}
+
+    def test_missing_portal_resolver_is_not_reported_as_absent(self):
+        by = self._audit_no_portal()
+        # marker not on Central, portal unchecked: UNKNOWN naming the cause
+        self.assertEqual(by['gone']['verdict'], 'UNKNOWN')
+        self.assertIn('resolver not installed', by['gone']['message'])
+        self.assertNotIn('not found on either', by['gone']['message'])
+
+    def test_missing_portal_resolver_never_recommends_stale_mirror(self):
+        by = self._audit_no_portal()
+        # portal-configured entry: Central mirror (1.4.0) must NOT become a
+        # switch recommendation while the configured source is unchecked
+        self.assertEqual(by['cdx']['verdict'], 'UNKNOWN')
+        self.assertIsNone(by['cdx']['suggested_url'])
+        self.assertIn('authority unverified', by['cdx']['message'])
+
+class TestSelfUpdateGitInteractive(unittest.TestCase):
+    """The self-update git pull must run with inherited stdio (ssh passphrase
+    prompts need the terminal) and give actionable hints on failure."""
+
+    def test_pull_runs_interactive_and_hints_on_failure(self):
+        import io, contextlib
+        calls = []
+        class _R:
+            def __init__(self, rc, out=''):
+                self.returncode = rc
+                self.stdout = out
+                self.stderr = ''
+        real_run = gradleInit.subprocess.run
+        def fake_run(cmd, **kw):
+            calls.append((list(cmd), kw))
+            if 'rev-parse' in cmd:
+                return _R(0, '/tmp/repo\n')
+            return _R(1)  # pull fails
+        gradleInit.subprocess.run = fake_run
+        try:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = gradleInit.self_update_git(Path('/tmp/repo/gradleInit.py'))
+        finally:
+            gradleInit.subprocess.run = real_run
+        self.assertEqual(rc, 1)
+        pull_calls = [kw for cmd, kw in calls if 'pull' in cmd]
+        self.assertEqual(len(pull_calls), 1)
+        # inherited stdio: no output capturing on the pull invocation
+        self.assertNotIn('capture_output', pull_calls[0])
+        self.assertNotIn('stdout', pull_calls[0])
+        out = buf.getvalue()
+        self.assertIn('ssh-add', out)
+        self.assertIn('Permission denied (publickey)', out)
+
+
+class TestSelfUpdateGitInteractive(unittest.TestCase):
+    """self_update_git must run 'git pull' with inherited stdio so ssh can
+    prompt for a key passphrase; capture_output turned a passphrase-protected
+    key into 'Permission denied (publickey)'."""
+
+    def _run(self, pull_rc):
+        calls = []
+        class R:
+            def __init__(self, rc, out=''):
+                self.returncode = rc; self.stdout = out; self.stderr = ''
+        def fake_run(cmd, **kw):
+            calls.append((cmd, kw))
+            if 'rev-parse' in cmd:
+                return R(0, '/tmp/repo\n')
+            return R(pull_rc)
+        import io, contextlib
+        orig = gradleInit.subprocess.run
+        gradleInit.subprocess.run = fake_run
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                rc = gradleInit.self_update_git(Path(gradleInit.__file__))
+        finally:
+            gradleInit.subprocess.run = orig
+        return rc, calls, buf.getvalue()
+
+    def test_pull_runs_with_inherited_stdio(self):
+        rc, calls, _ = self._run(pull_rc=0)
+        self.assertEqual(rc, 0)
+        pull = [kw for cmd, kw in calls if 'pull' in cmd][0]
+        self.assertNotIn('capture_output', pull)
+        self.assertNotIn('stdout', pull)
+
+    def test_failure_prints_ssh_hint(self):
+        rc, _, out = self._run(pull_rc=1)
+        self.assertEqual(rc, 1)
+        self.assertIn('ssh-add', out)
+        self.assertIn('Permission denied (publickey)', out)
+
 
 # ============================================================================
 # Test Runner

@@ -5522,18 +5522,36 @@ def audit_version_sources(manager: 'VersionManager', maven_central=None,
             'other': s_name, 'other_latest': s_latest,
             'suggested_url': None,
         }
+        # A missing resolver must never masquerade as "not found": we can only
+        # claim absence for registries we actually queried, and we must never
+        # recommend switching to a registry when the configured one could not
+        # be checked at all.
+        _mods_hint = 'run: gradleInit modules --update'
         if p_latest is None and s_latest is None:
             r['verdict'] = 'UNKNOWN'
             if primary is None and secondary is None:
-                r['message'] = 'no resolver available (gradleInit modules --update)'
+                r['message'] = f'no resolver available - {_mods_hint}'
+            elif secondary is None:
+                r['message'] = (f'not on {p_name}; {s_name} resolver not installed - '
+                                f'{_mods_hint}')
+            elif primary is None:
+                r['message'] = (f'{p_name} resolver not installed - {_mods_hint}; '
+                                f'not on {s_name} either')
             else:
                 r['message'] = f'not found on either registry ({p_name}, {s_name})'
         elif p_latest is None:
-            r['verdict'] = 'SWITCH'
-            r['suggested_url'] = (f'https://plugins.gradle.org/plugin/{group_id}'
-                                  if secondary is plugin_portal else
-                                  f'https://mvnrepository.com/artifact/{group_id}/{artifact_id}')
-            r['message'] = f'not on configured {p_name}; {s_name} has {s_latest}'
+            if primary is None:
+                # Configured source unchecked; the other registry may be a
+                # stale mirror, so do not recommend a switch.
+                r['verdict'] = 'UNKNOWN'
+                r['message'] = (f'{p_name} resolver not installed - {_mods_hint} '
+                                f'({s_name} shows {s_latest}, authority unverified)')
+            else:
+                r['verdict'] = 'SWITCH'
+                r['suggested_url'] = (f'https://plugins.gradle.org/plugin/{group_id}'
+                                      if secondary is plugin_portal else
+                                      f'https://mvnrepository.com/artifact/{group_id}/{artifact_id}')
+                r['message'] = f'not on configured {p_name}; {s_name} has {s_latest}'
         elif s_latest is not None and cmp(s_latest, p_latest) > 0:
             r['verdict'] = 'SWITCH'
             r['suggested_url'] = (f'https://plugins.gradle.org/plugin/{group_id}'
@@ -5575,6 +5593,9 @@ def print_source_audit(results: List[Dict[str, Any]]) -> int:
     findings = counts['SWITCH'] + counts['STALE']
     if findings:
         print_warning(f'{findings} source finding(s) need action')
+    elif counts['UNKNOWN']:
+        print_warning(f"{counts['UNKNOWN']} entr{'y' if counts['UNKNOWN']==1 else 'ies'} "
+                      f"could not be verified (see above)")
     else:
         print_success('all configured sources are authoritative')
     return findings
@@ -6231,16 +6252,19 @@ def self_update_git(script_path: Path) -> int:
         repo_root = repo_dir
 
     print(f"-> Git install detected; pulling latest in {repo_root}")
-    result = subprocess.run(
-        ['git', '-C', str(repo_root), 'pull', '--ff-only'],
-        capture_output=True, text=True
-    )
+    # Run git with inherited stdio: ssh key-passphrase and credential prompts
+    # need the terminal. capture_output would suppress the prompt and turn a
+    # passphrase-protected key into "Permission denied (publickey)".
+    result = subprocess.run(['git', '-C', str(repo_root), 'pull', '--ff-only'])
     if result.returncode != 0:
-        print("[ERROR] 'git pull --ff-only' failed:")
-        print((result.stderr or result.stdout).strip())
-        print("-> Resolve local changes or divergence manually, then retry.")
+        print("[ERROR] 'git pull --ff-only' failed (see git output above).")
+        print("-> Common causes:")
+        print("   - Local changes or divergence: resolve manually, then retry.")
+        print("   - SSH auth ('Permission denied (publickey)'): load your key first:")
+        print("       eval $(ssh-agent) && ssh-add ~/.ssh/<your-key>")
+        print("     or switch the remote to HTTPS for anonymous pulls:")
+        print(f"       git -C {repo_root} remote set-url origin https://github.com/{SELF_REPO_SLUG}.git")
         return 1
-    print(result.stdout.strip())
     print("[OK] Repository updated.")
     return 0
 
