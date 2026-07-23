@@ -1795,6 +1795,22 @@ class VersionManager:
             return (match.group(1), match.group(2))
         return ('', '')
 
+    def update_source_url(self, name: str, new_url: str) -> bool:
+        """Rewrite the source URL in an entry's comment line, keeping the
+        policy token. Used by 'versions --audit-sources --fix' to point an
+        entry at the authoritative registry."""
+        entry = self.get_entry(name)
+        if not entry or not entry.url or not entry.comment_line_number:
+            return False
+        lines = self.toml_path.read_text(encoding='utf-8').split('\n')
+        idx = entry.comment_line_number - 1
+        if idx >= len(lines) or entry.url not in lines[idx]:
+            return False
+        lines[idx] = lines[idx].replace(entry.url, new_url, 1)
+        write_text_lf(self.toml_path, '\n'.join(lines))
+        entry.url = new_url
+        return True
+
     def check_updates(self, maven_central=None, include_recent: bool = False, recent_hours: int = 48, force_latest: bool = False, plugin_portal=None) -> List[Dict[str, Any]]:
         """
         Check for available updates.
@@ -3071,6 +3087,9 @@ class DynamicCLIBuilder:
                                       help='Cross-check every entry against BOTH registries '
                                            '(Maven Central and Gradle Plugin Portal) to detect '
                                            'stale mirrors and wrong source URLs')
+        versions_parser.add_argument('--fix', action='store_true',
+                                      help='With --audit-sources: rewrite catalog source URLs '
+                                           'to the suggested authoritative registry')
         versions_parser.add_argument('dependency', nargs='?',
                                       help='Specific dependency to update (optional)')
 
@@ -5660,6 +5679,22 @@ def handle_versions_command(args: argparse.Namespace) -> int:
             return 1
         audit = audit_version_sources(manager, maven_central, plugin_portal)
         findings = print_source_audit(audit)
+        fixable = [r for r in audit if r['verdict'] == 'SWITCH' and r.get('suggested_url')]
+        if fixable and getattr(args, 'fix', False):
+            print()
+            failed = 0
+            for r in fixable:
+                if manager.update_source_url(r['name'], r['suggested_url']):
+                    print_success(f"Source URL updated: {r['name']} -> {r['suggested_url']}")
+                else:
+                    print_error(f"Could not update source URL for {r['name']}")
+                    failed += 1
+            print_info("Run 'gradleInit versions --update' to raise the version(s) "
+                       "from the new source.")
+            remaining = (findings - len(fixable)) + failed
+            return 1 if remaining else 0
+        if fixable:
+            print_info("Run with --fix to apply the suggested URL switch(es).")
         return 1 if findings else 0
 
     # Get recent_hours from config (default 48)

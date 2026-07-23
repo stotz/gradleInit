@@ -501,7 +501,7 @@ def gradle_ssot_plan(gi, toml_text: str, wrapper_text: str,
     return (current, target, policy)
 
 
-def run_audit(root: Path) -> int:
+def run_audit(root: Path, fix: bool = False) -> int:
     """Cross-check every SSoT entry against both registries (Maven Central and
     the Gradle Plugin Portal) to detect stale mirrors and wrong source URLs."""
     toml_path = root / "gradleInit" / "versions" / "gradle" / "libs.versions.toml"
@@ -519,8 +519,23 @@ def run_audit(root: Path) -> int:
     print(f"-> Auditing version sources in {toml_path}")
     print()
     manager = gi.VersionManager(toml_path)
-    findings = gi.print_source_audit(
-        gi.audit_version_sources(manager, maven_central, plugin_portal))
+    audit = gi.audit_version_sources(manager, maven_central, plugin_portal)
+    findings = gi.print_source_audit(audit)
+    fixable = [r for r in audit if r['verdict'] == 'SWITCH' and r.get('suggested_url')]
+    if fixable and fix:
+        print()
+        failed = 0
+        for r in fixable:
+            if manager.update_source_url(r['name'], r['suggested_url']):
+                print(f"[OK] Source URL updated: {r['name']} -> {r['suggested_url']}")
+            else:
+                print(f"[ERROR] Could not update source URL for {r['name']}")
+                failed += 1
+        print("Run '--update' to raise the version(s) from the new source, "
+              "then '--apply'.")
+        return 1 if (findings - len(fixable)) + failed else 0
+    if fixable:
+        print("Run '--audit --fix' to apply the suggested URL switch(es).")
     return 1 if findings else 0
 
 
@@ -662,6 +677,8 @@ def main(argv=None) -> int:
                         help="Directory containing gradleInit and gradleInitTemplates")
     parser.add_argument("--include-recent", action="store_true",
                         help="With --update: also raise versions released within the recent-hours window")
+    parser.add_argument("--fix", action="store_true",
+                      help="With --audit: rewrite SSoT source URLs to the suggested registry")
     parser.add_argument("--yes", action="store_true",
                         help="With --update: apply without the confirmation prompt")
     args = parser.parse_args(argv)
@@ -672,7 +689,7 @@ def main(argv=None) -> int:
         return run_update(root, include_recent=args.include_recent, assume_yes=args.yes)
 
     if args.audit:
-        return run_audit(root)
+        return run_audit(root, fix=args.fix)
 
     if args.apply:
         changes = run_apply(root)

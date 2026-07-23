@@ -1385,6 +1385,29 @@ class TestAuditSources(unittest.TestCase):
         self.assertIn('resolver not installed', by['gone']['message'])
         self.assertNotIn('not found on either', by['gone']['message'])
 
+    def test_fix_rewrites_url_and_reaudit_is_clean(self):
+        f = Path(tempfile.mkdtemp()) / 'libs.versions.toml'
+        f.write_text(
+            '[versions]\n'
+            '# https://mvnrepository.com/artifact/org.beryx.jlink/org.beryx.jlink.gradle.plugin @*\n'
+            'beryx_jlink = "3.1.5"\n', encoding='utf-8')
+        self.addCleanup(shutil.rmtree, f.parent, ignore_errors=True)
+        class Maven:
+            def get_latest_version(self, g, a): return None
+        class Portal:
+            def get_latest_version(self, g, a): return '4.1.0'
+        mgr = gradleInit.VersionManager(f)
+        audit = gradleInit.audit_version_sources(mgr, Maven(), Portal())
+        self.assertEqual(audit[0]['verdict'], 'SWITCH')
+        self.assertTrue(mgr.update_source_url('beryx_jlink', audit[0]['suggested_url']))
+        txt = f.read_text(encoding='utf-8')
+        self.assertIn('# https://plugins.gradle.org/plugin/org.beryx.jlink @*', txt)
+        self.assertIn('beryx_jlink = "3.1.5"', txt)  # version untouched, raised by --update
+        self.assertNotIn('\r', txt)
+        re_audit = gradleInit.audit_version_sources(
+            gradleInit.VersionManager(f), Maven(), Portal())
+        self.assertEqual(re_audit[0]['verdict'], 'OK')
+
     def test_missing_portal_resolver_never_recommends_stale_mirror(self):
         by = self._audit_no_portal()
         # portal-configured entry: Central mirror (1.4.0) must NOT become a

@@ -12,12 +12,12 @@
 
 
 
-## Aktueller Stand (v0062)
+## Aktueller Stand (v0063)
 
 gradleInit ist ein Python-basiertes Tool zur Generierung von Kotlin/Gradle-Projekten aus Templates.
 Verwendet Jinja2 fuer Template-Verarbeitung mit inline Hint-System.
 SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.7; die 4-stellige AI-Versionierung
-ist davon getrennt und laeuft linear (zuletzt v0062).
+ist davon getrennt und laeuft linear (zuletzt v0063).
 
 Hinweis zur History: Die Versionstabelle unten ist zwischen v0023 und v0024 unvollstaendig.
 Einige Features (erweiterte Hint-Syntax mit Regex, Template-Compilation-Cache) sind im Code
@@ -38,6 +38,24 @@ Hauptfeatures:
 - --latest Flag fuer @* statt @pin Version-Constraints
 
 ## Aktuelle Arbeit
+
+v0063: --audit-sources --fix (SWITCH-Befunde automatisch anwenden)
+
+- Der dias-Audit zeigte den SWITCH fuer beryx_jlink korrekt an, verlangte aber manuelles
+  Editieren der URL. Neu: 'gradleInit versions --audit-sources --fix' schreibt die
+  vorgeschlagene authoritative URL direkt in die Kommentarzeile des Katalogs
+  (VersionManager.update_source_url: ersetzt nur die URL, Policy-Token und Version
+  bleiben unangetastet, LF via write_text_lf). Danach hebt 'versions --update' die
+  Version aus der neuen Quelle (z.B. beryx 3.1.5 -> 4.1.0). Ohne --fix weist der Audit
+  auf das Flag hin. Analog 'version_sync --audit --fix' fuer die SSoT.
+- Exit-Verhalten: nach erfolgreichem --fix zaehlen die behobenen SWITCHes nicht mehr als
+  Findings (Exit 0, sofern keine STALE/fehlgeschlagenen Fixes bleiben) - CI-tauglich.
+- Verifiziert am nachgestellten dias-Katalog: URL getauscht, @*-Token und Version
+  erhalten, Re-Audit komplett gruen, LF erhalten.
+- Tests: TestAuditSources erweitert (Fix schreibt URL, Version unberuehrt, Re-Audit OK).
+  Suite 150 passed.
+- Betroffenes Repo: gradleInit (gradleInit.py, tools/version_sync.py,
+  test_gradleInit.py).
 
 v0062: Selfupdate-Pull mit Terminal (SSH-Passphrase-Prompt) + Live-Bestaetigung Audit
 
