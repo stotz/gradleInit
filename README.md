@@ -45,11 +45,11 @@ A comprehensive single-file Python tool for creating professional Kotlin/Gradle 
 <!-- vregion:begin -->
 | Template | Description | Key Dependencies |
 |----------|-------------|------------------|
-| `kotlin-single` | Single-module CLI application | Clikt <!--v:clikt-->5.1.0<!--/v-->, Shadow <!--v:shadow-->9.6.0<!--/v--> |
-| `kotlin-multi` | Multi-module with buildSrc | Shadow <!--v:shadow-->9.6.0<!--/v--> |
+| `kotlin-single` | Single-module CLI application | Clikt <!--v:clikt-->5.1.0<!--/v-->, Shadow <!--v:shadow-->9.6.1<!--/v--> |
+| `kotlin-multi` | Multi-module with buildSrc | Shadow <!--v:shadow-->9.6.1<!--/v--> |
 | `ktor` | Ktor HTTP server | Ktor <!--v:ktor-->3.5.1<!--/v-->, Logback <!--v:logback-->1.5.38<!--/v--> |
 | `springboot` | Spring Boot REST API | Spring Boot <!--v:spring-boot-->4.1.0<!--/v--> |
-| `kotlin-javaFX` | JavaFX desktop application | JavaFX <!--v:javafx-->26.0.1<!--/v-->, Ikonli <!--v:ikonli-->12.4.0<!--/v--> |
+| `kotlin-javaFX` | JavaFX desktop application | JavaFX <!--v:javafx-->26.0.2<!--/v-->, Ikonli <!--v:ikonli-->12.4.0<!--/v--> |
 | `multiproject-root` | Root for multi-module projects | All above available |
 <!-- vregion:end -->
 
@@ -61,10 +61,10 @@ Kotlin:      2.4.10 (via kotlin_version variable)
 JUnit:       6.1.2
 AssertJ:     3.27.7
 MockK:       1.14.11
-Shadow:      9.6.0
+Shadow:      9.6.1
 Ktor:        3.5.1
 Spring Boot: 4.1.0
-JavaFX:      26.0.1
+JavaFX:      26.0.2
 Logback:     1.5.38
 Clikt:       5.1.0<!-- versions:end -->
 ```

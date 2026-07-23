@@ -28,7 +28,7 @@ kover = "0.9.9"
 # https://plugins.gradle.org/plugin/org.cyclonedx.bom @*
 cyclonedx = "3.3.0"
 # https://mvnrepository.com/artifact/com.gradleup.shadow/shadow-gradle-plugin @*
-shadow = "9.6.0"
+shadow = "9.6.1"
 # https://mvnrepository.com/artifact/com.github.ajalt.clikt/clikt @*
 clikt = "5.1.0"
 # https://mvnrepository.com/artifact/io.ktor/ktor-server-core-jvm @*
@@ -42,7 +42,7 @@ spring-dependency-management = "1.1.7"
 # https://plugins.gradle.org/plugin/org.beryx.jlink @*
 beryx_jlink = "4.1.0"
 # https://mvnrepository.com/artifact/org.openjfx/javafx-base @*
-javafx = "26.0.1"
+javafx = "26.0.2"
 # https://mvnrepository.com/artifact/org.kordamp.ikonli/ikonli-javafx @*
 ikonli = "12.4.0"
 # https://mvnrepository.com/artifact/com.dlsc.formsfx/formsfx-core @*
