@@ -470,6 +470,20 @@ def _load_maven_central(gi):
     return None
 
 
+def _load_plugin_portal(gi):
+    """Load the Gradle Plugin Portal resolver from the installed modules, or None."""
+    try:
+        paths = gi.GradleInitPaths()
+        modules_dir = getattr(paths, "modules_dir", None)
+        if modules_dir and modules_dir.exists():
+            sys.path.insert(0, str(modules_dir))
+            from resolvers.gradle_plugin_portal import GradlePluginPortal  # type: ignore
+            return GradlePluginPortal()
+    except Exception:
+        pass
+    return None
+
+
 def gradle_ssot_plan(gi, toml_text: str, wrapper_text: str,
                      available: List[str]) -> Tuple:
     """Return (current, target, policy) for the SSoT Gradle wrapper.
@@ -485,6 +499,29 @@ def gradle_ssot_plan(gi, toml_text: str, wrapper_text: str,
         return (current, None, policy)
     target = gi._select_gradle_target(current, available, policy) if available else None
     return (current, target, policy)
+
+
+def run_audit(root: Path) -> int:
+    """Cross-check every SSoT entry against both registries (Maven Central and
+    the Gradle Plugin Portal) to detect stale mirrors and wrong source URLs."""
+    toml_path = root / "gradleInit" / "versions" / "gradle" / "libs.versions.toml"
+    if not toml_path.exists():
+        print(f"[ERROR] SSoT catalog not found: {toml_path}")
+        return 2
+    gi = _load_gradleinit()
+    if gi is None:
+        return 2
+    maven_central = _load_maven_central(gi)
+    plugin_portal = _load_plugin_portal(gi)
+    if maven_central is None and plugin_portal is None:
+        print("[ERROR] no resolvers available - run: gradleInit modules --update")
+        return 2
+    print(f"-> Auditing version sources in {toml_path}")
+    print()
+    manager = gi.VersionManager(toml_path)
+    findings = gi.print_source_audit(
+        gi.audit_version_sources(manager, maven_central, plugin_portal))
+    return 1 if findings else 0
 
 
 def run_update(root: Path, include_recent: bool = False, assume_yes: bool = False,
@@ -519,7 +556,8 @@ def run_update(root: Path, include_recent: bool = False, assume_yes: bool = Fals
         results = []
     else:
         results = manager.check_updates(maven_central, include_recent=include_recent,
-                                        recent_hours=recent_hours)
+                                        recent_hours=recent_hours,
+                                        plugin_portal=_load_plugin_portal(gi))
     lib_updates = [r for r in results if r.get("status") == "UPDATE"]
     too_recent = [r for r in results if r.get("status") == "TOO_RECENT"]
 
@@ -545,6 +583,8 @@ def run_update(root: Path, include_recent: bool = False, assume_yes: bool = Fals
             print(f"  [CURRENT] {name}: {r['current']} (up to date)")
         elif status == "PINNED":
             print(f"  [PINNED]  {name}: {r['current']} ({r['message']})")
+        elif status == "STALE_SOURCE":
+            print(f"  [STALE!]  {name}: {r['current']} ({r['message']})")
         elif status in ("SKIP", "NOT_FOUND"):
             print(f"  [SKIP]    {name}: {r['current']} ({r['message']})")
         elif status == "VIOLATE":
@@ -613,6 +653,9 @@ def main(argv=None) -> int:
                       help="Read-only consistency check (exit 1 on drift)")
     mode.add_argument("--update", action="store_true",
                       help="Raise SSoT versions via resolvers (Maven Central + Gradle)")
+    mode.add_argument("--audit", action="store_true",
+                      help="Cross-check every SSoT entry against both registries "
+                           "(stale-mirror / wrong-URL detection)")
     mode.add_argument("--apply", action="store_true",
                       help="Write SSoT values into derived locations")
     parser.add_argument("--root", type=Path, default=None,
@@ -627,6 +670,9 @@ def main(argv=None) -> int:
 
     if args.update:
         return run_update(root, include_recent=args.include_recent, assume_yes=args.yes)
+
+    if args.audit:
+        return run_audit(root)
 
     if args.apply:
         changes = run_apply(root)

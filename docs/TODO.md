@@ -12,12 +12,12 @@
 
 
 
-## Aktueller Stand (v0054)
+## Aktueller Stand (v0060)
 
 gradleInit ist ein Python-basiertes Tool zur Generierung von Kotlin/Gradle-Projekten aus Templates.
 Verwendet Jinja2 fuer Template-Verarbeitung mit inline Hint-System.
-SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.5; die 4-stellige AI-Versionierung
-ist davon getrennt und laeuft linear (zuletzt v0054).
+SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.6; die 4-stellige AI-Versionierung
+ist davon getrennt und laeuft linear (zuletzt v0060).
 
 Hinweis zur History: Die Versionstabelle unten ist zwischen v0023 und v0024 unvollstaendig.
 Einige Features (erweiterte Hint-Syntax mit Regex, Template-Compilation-Cache) sind im Code
@@ -38,6 +38,150 @@ Hauptfeatures:
 - --latest Flag fuer @* statt @pin Version-Constraints
 
 ## Aktuelle Arbeit
+
+v0060: versions --audit-sources und version_sync --audit (Beide-Quellen-Vergleich)
+
+- Schliesst die Restluecke aus v0059: der Stale-Detektor griff nur, wenn die lokale
+  Version bereits neuer war als der Spiegel. Der Audit vergleicht jetzt JEDEN
+  URL-gestuetzten Eintrag mit BEIDEN Registries (Maven Central + Gradle Plugin Portal),
+  unabhaengig vom lokalen Stand.
+- Verdikte: OK (konfigurierte Quelle authoritativ; nennt informativ, wenn die andere
+  Registry ein veralteter Spiegel ist), SWITCH (andere Registry neuer oder Artefakt auf
+  der konfigurierten fehlt -> konkrete Umstell-URL wird ausgegeben), STALE (Quelle
+  aelter als lokale Version), UNKNOWN (nirgends gefunden). Exit 1 bei SWITCH/STALE
+  (CI-tauglich). Templated-Eintraege (kotlin/jdk) werden uebersprungen.
+- Kernfall abgedeckt: Eintrag selbst veraltet (z.B. cdx 2.0.0) + Central-Spiegel 1.4.0
+  -> v0059 haette geschwiegen, der Quervergleich meldet SWITCH auf Portal 3.3.0.
+- Zwei Einstiege: 'gradleInit versions --audit-sources' (Projekt-/Template-Kataloge,
+  braucht settings.gradle.kts) und 'python tools/version_sync.py --audit' (SSoT).
+  Implementierung als gemeinsame Modul-Funktionen audit_version_sources +
+  print_source_audit in gradleInit.py.
+- Tests: TestAuditSources (alle Verdikte inkl. Kernfall, Findings-Zaehlung, Skip der
+  Platzhalter). Suite 145 passed.
+- OFFEN: Live-Lauf gegen beide Registries auf Deiner Maschine
+  (python tools/version_sync.py --audit) - erwartet: alles OK/gruen.
+- Betroffenes Repo: gradleInit (gradleInit.py, tools/version_sync.py,
+  test_gradleInit.py).
+
+v0059: Stale-Mirror-Detektor (Antwort auf "wie entdecken wir solche Faelle?")
+
+- Kernsignal: meldet eine Quelle als "latest" eine Version, die AELTER ist als unsere
+  aktuelle, kann die Quelle nicht die gepflegte Registry sein (cyclonedx: Central 1.4.0
+  vs. unsere 3.3.0). check_updates flaggt das jetzt als [STALE!] STALE_SOURCE mit
+  Klartext-Meldung, statt still "up to date"/Downgrade-Logik laufen zu lassen.
+- Zweites Signal fuer Gradle-Plugin-Marker (artifactId endet auf .gradle.plugin): bei
+  STALE_SOURCE und bei NOT_FOUND wird automatisch das Plugin Portal gegengeprueft; hat
+  es eine >= aktuelle Version, nennt die Meldung die konkrete Umstell-URL
+  (https://plugins.gradle.org/plugin/<id>). Beide historischen Faelle (cyclonedx stale,
+  beryx_jlink not-found) haetten damit sofort die richtige Anweisung geliefert.
+- Ausgabe: 'versions' zeigt [STALE!]-Zeilen und einen Summary-Hinweis
+  ("N STALE SOURCE(S) - action needed"); version_sync --update ebenso.
+- Tests: TestStaleSourceDetection (stale lib, stale Marker mit Portal-Hint, not-found
+  Marker mit Portal-Hint, normales Update bleibt UPDATE).
+- Betroffenes Repo: gradleInit (gradleInit.py, tools/version_sync.py,
+  test_gradleInit.py).
+
+v0058: beryx_jlink auf Plugin Portal umgestellt und auf 4.1.0 angehoben
+
+- Gleicher Fall wie cyclonedx (v0057): die mvnrepository-URL fuer
+  org.beryx.jlink.gradle.plugin fuehrte ins Leere (bisher dauerhaft
+  "[SKIP] not on Maven Central"), waehrend die aktuelle 4.1.0 auf dem Gradle Plugin
+  Portal liegt. Das kotlin-javaFX-Template stand dadurch veraltet auf 3.1.5.
+- Fix ueber die SSoT-Maschine: SSoT-URL auf
+  https://plugins.gradle.org/plugin/org.beryx.jlink @* gestellt und Version auf 4.1.0
+  (vom DiaS-UI-Projekt real gebaut); Template-Katalog-Kommentar ebenso auf die
+  Portal-URL. version_sync --apply hat Template-Katalog und den kotlin-javaFX-README-
+  Span konvergiert; --check gruen.
+- Verifiziert: der Portal-Resolver (v0057) uebersetzt die neue URL in die
+  Marker-Koordinaten (org.beryx.jlink / org.beryx.jlink.gradle.plugin) und loest den
+  Eintrag auf (statt NOT_FOUND); version_sync- und Portal-Tests gruen (24), alles LF.
+  Damit wird beryx_jlink kuenftig automatisch mitgepflegt.
+- OFFEN: kotlin-javaFX-Build mit jlink 4.1.0 (kein Gradle im Sandbox; DiaS UI mit 4.1.0
+  ist ein starkes Signal, das Template selbst aber ungebaut - zusammen mit
+  validatorfx 1.0.0 beim naechsten ./gradlew build pruefen).
+- Betroffene Repos: gradleInit (SSoT), gradleInitTemplates (kotlin-javaFX
+  Katalog-URL + Version, README-Span).
+
+v0057: Gradle-Plugin-Portal-Resolver (cyclonedx-URL-Korrektur)
+
+- Korrektur zu v0056: Maven Central traegt vom CycloneDX-Plugin nur den veralteten Spiegel
+  (org.cyclonedx/cyclonedx-gradle-plugin: 1.4.0 von 2021); die aktuelle 3.3.0 liegt nur
+  auf dem Gradle Plugin Portal. mvnrepository-URL waere als Update-Quelle falsch gewesen.
+- Statt Dauer-SKIP: neuer Resolver GradlePluginPortal in gradleInitModules
+  (resolvers/gradle_plugin_portal.py) - Subklasse von MavenCentral, denn das Portal ist
+  ein Standard-Maven-Repo unter https://plugins.gradle.org/m2 (maven-metadata.xml,
+  Plugin-Marker <id>:<id>.gradle.plugin). Eigener Cache (cache/plugin-portal), kein
+  Search-API-Fallback (Portal hat keine). In MODULES.toml registriert.
+- gradleInit.py: URL_PATTERN akzeptiert plugins.gradle.org/plugin/<id>-URLs;
+  extract_artifact_coords liefert die Marker-Koordinaten; check_updates waehlt den
+  Resolver pro Eintrag (Portal-URL -> Portal, sonst Maven Central), Meldungen nennen die
+  Quelle; fehlt der Portal-Resolver, gibt es einen klaren SKIP-Hinweis (modules --update).
+  handle_versions_command und version_sync run_update laden den Portal-Resolver mit.
+- cyclonedx-URLs in SSoT und allen 5 Template-Katalogen auf
+  https://plugins.gradle.org/plugin/org.cyclonedx.bom gestellt; damit kann
+  version_sync --update cyclonedx kuenftig automatisch anheben.
+- Tests: TestPluginPortalResolution (Koordinaten, Resolver-Wahl je Eintrag, SKIP ohne
+  Portal-Client, Modul-Subklasse inkl. Metadata-URL).
+- OFFEN: Live-Aufloesung gegen plugins.gradle.org (kein Netz im Sandbox) - ein
+  'version_sync --update'-Lauf auf Deiner Maschine verifiziert den Resolver real.
+- Betroffene Repos: gradleInit (gradleInit.py, tools/version_sync.py, SSoT,
+  test_gradleInit.py), gradleInitTemplates (5 Katalog-URLs),
+  gradleInitModules (neuer Resolver, MODULES.toml).
+
+v0056: ktor ohne explizites Shadow-Plugin + CycloneDX-SBOM in allen Templates
+
+- Erkenntnis aus GMBooking/CoFix: das Ktor-Gradle-Plugin (io.ktor.plugin) bringt Shadow
+  bereits eingebettet mit (CoFix nutzt tasks.shadowJar ohne Shadow im plugins-Block).
+  ktor-Template entsprechend umgestellt: standalone verliert alias(libs.plugins.shadow);
+  die Subproject-Variante ersetzt shadow durch alias(libs.plugins.ktor) (behaelt damit
+  tasks.shadowJar und EngineMain); shadow komplett aus dem ktor-Katalog entfernt.
+  Ein ktor-only-Multiproject ist damit shadow-frei.
+- CycloneDX (3.3.0) nach dem GMBooking/CoFix-Muster in alle 5 Template-Kataloge und die
+  SSoT aufgenommen (cyclonedx + Plugin cyclonedx-bom); alle 10 Build-Dateien wenden
+  alias(libs.plugins.cyclonedx.bom) an und konfigurieren tasks.cyclonedxDirectBom
+  bewusst auf runtimeClasspath (SBOM = "was laeuft in Produktion", nicht Test-Frameworks/
+  Kover-Agent); kotlin-multi lib als Component.Type.LIBRARY, alle anderen APPLICATION.
+  SSoT-URL auf mvnrepository (org.cyclonedx/cyclonedx-gradle-plugin), damit
+  version_sync --update die Version auflosen kann (statt plugins.gradle.org).
+- Verifiziert: Generierungsmatrix inkl. ktor-only-Multiproject (shadow weg, ktor/kover/
+  cyclonedx aufgeloest), alle libs.*-Referenzen loesen auf, Suite 135 passed,
+  version_sync --check gruen, alles LF.
+- OFFEN: Gradle-Builds der generierten Projekte (kein Gradle/Netz im Sandbox), inkl.
+  cyclonedxDirectBom-Task-Name gegen 3.3.0 und ktor buildFatJar/shadowJar.
+- Betroffene Repos: gradleInitTemplates (ktor-Umbau, Kataloge, 10 Build-Dateien),
+  gradleInit (SSoT).
+
+v0055: Kover-Coverage-Gate in den Templates
+
+- Kover (0.9.9) in alle 5 Template-Kataloge und die SSoT aufgenommen ([versions] +
+  [plugins], Policy @* in der SSoT); multiproject-root bleibt minimal, kover kommt dort
+  per Subprojekt-Merge an. Alle 10 Build-Dateien (build.gradle.kts + .subproject bzw.
+  app/lib) wenden alias(libs.plugins.kover) an.
+- Gate-Design (Ratchet, Boden 50, "test finalizedBy koverVerify"): Verify-Regel nur dort,
+  wo Tests existieren, damit frisch generierte Projekte gruen bauen. Excludes sind der
+  projektspezifische Teil und nutzen {{ group }}:
+  * kotlin-single: Gate, Exclude {{ group }}.MainKt (Entry-Point-Wiring)
+  * ktor: Gate ohne Excludes; NEU ApplicationTest.kt (testApplication, / und /hello) -
+    module() wird von den HTTP-Tests ausgefuehrt; standalone-Build bekam
+    kotlin("test") + useJUnitPlatform()
+  * springboot: Gate, Excludes ApplicationKt + {{ project_name | PascalCase }}Application;
+    NEU HelloControllerTest.kt (Unit-Test ohne Spring-Kontext)
+  * kotlin-multi: lib mit Gate + NEU GreeterTest.kt; app nur Reporting (Entry-Point) mit
+    Kommentar zum spaeteren Aktivieren
+  * kotlin-javaFX: nur Reporting; Gate-Kommentar verweist auf TestFX (Smoke-Tests allein
+    tragen keinen Coverage-Boden)
+- Damit werden die bisherigen Test-Kit-Orphans (junit/assertj im ktor-Katalog) erstmals
+  referenziert.
+- Verifiziert: init aller 5 Templates + multiproject-root mit 4 Subprojekten; alle
+  libs.*-Referenzen loesen auf (inkl. kover), Excludes rendern mit group, neue Tests
+  werden generiert, keine leeren Versionen; version_sync --check gruen; alles LF.
+- OFFEN: Gradle-Builds der generierten Projekte (kein Gradle/Netz im Sandbox) - bitte je
+  Template ./gradlew build laufen lassen; ebenso validatorfx 1.0.0 (Major) ungebaut.
+- BEFUND (separat, vorbestehend): kotlin-javaFX Hint Zeile 58 hat einen verschachtelten
+  Default ({{ group }}.MainKt im Hint-Default), der unrendered in die generierte Datei
+  gelangt -> mainClass.set("{{ group }}.MainKt"). Fix ausstehend.
+- Betroffene Repos: gradleInitTemplates (Kataloge, 10 Build-Dateien, 3 neue Tests),
+  gradleInit (SSoT).
 
 v0054: update_all_versions.sh auf version_sync umgebogen (ein Weg zur SSoT)
 

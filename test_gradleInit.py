@@ -1181,6 +1181,190 @@ class TestLineEndings(unittest.TestCase):
                      and 'Path.write_text()' not in ln]
         self.assertEqual(offenders, [], f"raw write_text found: {offenders}")
 
+class TestPluginPortalResolution(unittest.TestCase):
+    """Entries with a plugins.gradle.org URL must resolve against the Plugin
+    Portal resolver, not Maven Central (which may carry stale mirrors)."""
+
+    CATALOG = (
+        '[versions]\n'
+        '# https://plugins.gradle.org/plugin/org.cyclonedx.bom @*\n'
+        'cyclonedx = "3.3.0"\n'
+        '# https://mvnrepository.com/artifact/io.ktor/ktor-server-core-jvm @*\n'
+        'ktor = "3.5.1"\n'
+    )
+
+    class _Stub:
+        def __init__(self, v): self.v = v
+        def get_versions(self, g, a, limit=1, include_prerelease=False): return [self.v]
+        def get_version_info(self, g, a): return {"version": self.v, "age_hours": 1000.0}
+        def get_latest_version(self, g, a): return self.v
+        def get_matching_version(self, g, a, ct, cv, cur): return self.v
+
+    def _manager(self):
+        f = Path(tempfile.mkdtemp()) / 'libs.versions.toml'
+        f.write_text(self.CATALOG, encoding='utf-8')
+        self.addCleanup(shutil.rmtree, f.parent, ignore_errors=True)
+        return gradleInit.VersionManager(f)
+
+    def test_coords_for_portal_url(self):
+        mgr = self._manager()
+        self.assertEqual(
+            mgr.extract_artifact_coords('https://plugins.gradle.org/plugin/org.cyclonedx.bom'),
+            ('org.cyclonedx.bom', 'org.cyclonedx.bom.gradle.plugin'))
+        self.assertEqual(
+            mgr.extract_artifact_coords('https://mvnrepository.com/artifact/io.ktor/ktor-server-core-jvm'),
+            ('io.ktor', 'ktor-server-core-jvm'))
+
+    def test_each_entry_uses_its_resolver(self):
+        res = self._manager().check_updates(
+            self._Stub("7.7.7"), include_recent=True, plugin_portal=self._Stub("9.9.9"))
+        latest = {r['name']: r['latest'] for r in res}
+        self.assertEqual(latest['cyclonedx'], '9.9.9')  # portal resolver
+        self.assertEqual(latest['ktor'], '7.7.7')       # maven central resolver
+
+    def test_portal_entry_skips_without_portal_resolver(self):
+        res = self._manager().check_updates(
+            self._Stub("7.7.7"), include_recent=True, plugin_portal=None)
+        by = {r['name']: r for r in res}
+        self.assertEqual(by['cyclonedx']['status'], 'SKIP')
+        self.assertIn('Plugin Portal', by['cyclonedx']['message'])
+        self.assertEqual(by['ktor']['status'], 'UPDATE')
+
+    MODULES_DIR = Path(__file__).parent.parent / 'gradleInitModules'
+
+    @unittest.skipUnless((MODULES_DIR / 'resolvers' / 'gradle_plugin_portal.py').exists(),
+                         'gradleInitModules not present as sibling')
+    def test_portal_module_subclass(self):
+        import importlib.util
+        base = self.MODULES_DIR / 'resolvers'
+        spec_m = importlib.util.spec_from_file_location('resolvers.maven_central',
+                                                        base / 'maven_central.py')
+        mc = importlib.util.module_from_spec(spec_m)
+        import sys as _sys
+        _sys.modules['resolvers.maven_central'] = mc
+        spec_m.loader.exec_module(mc)
+        spec_p = importlib.util.spec_from_file_location('resolvers.gradle_plugin_portal',
+                                                        base / 'gradle_plugin_portal.py')
+        gp = importlib.util.module_from_spec(spec_p)
+        spec_p.loader.exec_module(gp)
+        pp = gp.GradlePluginPortal(cache_dir=Path(tempfile.mkdtemp()))
+        self.addCleanup(shutil.rmtree, pp.cache_dir, ignore_errors=True)
+        self.assertEqual(pp.get_name(), 'Gradle Plugin Portal')
+        self.assertEqual(
+            pp._build_metadata_url('org.cyclonedx.bom', 'org.cyclonedx.bom.gradle.plugin'),
+            'https://plugins.gradle.org/m2/org/cyclonedx/bom/'
+            'org.cyclonedx.bom.gradle.plugin/maven-metadata.xml')
+        self.assertIsNone(pp._fetch_via_search_api('x', 'y'))
+
+class TestStaleSourceDetection(unittest.TestCase):
+    """A registry whose newest release is OLDER than our current version is a
+    stale mirror and must be flagged; plugin markers get a Portal cross-check."""
+
+    class _Maven:
+        def get_versions(self, g, a, limit=1, include_prerelease=False):
+            return [] if g == 'org.gone' else ["1.4.0"]
+        def get_version_info(self, g, a): return {"version": "1.4.0", "age_hours": 40000.0}
+        def get_latest_version(self, g, a): return "1.4.0"
+        def get_matching_version(self, g, a, ct, cv, cur): return "1.4.0"
+
+    class _Portal:
+        def get_latest_version(self, g, a): return "3.3.0"
+
+    def _mgr(self, catalog):
+        f = Path(tempfile.mkdtemp()) / 'libs.versions.toml'
+        f.write_text(catalog, encoding='utf-8')
+        self.addCleanup(shutil.rmtree, f.parent, ignore_errors=True)
+        return gradleInit.VersionManager(f)
+
+    def test_stale_mirror_flagged(self):
+        res = self._mgr('[versions]\n'
+                        '# https://mvnrepository.com/artifact/org.x/lib @*\n'
+                        'lib = "3.3.0"\n').check_updates(
+            self._Maven(), include_recent=True, plugin_portal=self._Portal())
+        self.assertEqual(res[0]['status'], 'STALE_SOURCE')
+        self.assertIn('stale mirror', res[0]['message'])
+
+    def test_stale_plugin_marker_gets_portal_hint(self):
+        res = self._mgr('[versions]\n'
+                        '# https://mvnrepository.com/artifact/org.x.bom/org.x.bom.gradle.plugin @*\n'
+                        'plug = "3.3.0"\n').check_updates(
+            self._Maven(), include_recent=True, plugin_portal=self._Portal())
+        self.assertEqual(res[0]['status'], 'STALE_SOURCE')
+        self.assertIn('https://plugins.gradle.org/plugin/org.x.bom', res[0]['message'])
+
+    def test_not_found_marker_gets_portal_hint(self):
+        res = self._mgr('[versions]\n'
+                        '# https://mvnrepository.com/artifact/org.gone/org.gone.gradle.plugin @*\n'
+                        'plug = "3.1.5"\n').check_updates(
+            self._Maven(), include_recent=True, plugin_portal=self._Portal())
+        self.assertEqual(res[0]['status'], 'NOT_FOUND')
+        self.assertIn('https://plugins.gradle.org/plugin/org.gone', res[0]['message'])
+
+    def test_normal_update_not_flagged(self):
+        class Newer(self._Maven):
+            def get_versions(self, g, a, limit=1, include_prerelease=False): return ["9.9.9"]
+            def get_version_info(self, g, a): return {"version": "9.9.9", "age_hours": 1000.0}
+            def get_latest_version(self, g, a): return "9.9.9"
+        res = self._mgr('[versions]\n'
+                        '# https://mvnrepository.com/artifact/org.x/lib @*\n'
+                        'lib = "3.3.0"\n').check_updates(
+            Newer(), include_recent=True, plugin_portal=None)
+        self.assertEqual(res[0]['status'], 'UPDATE')
+
+class TestAuditSources(unittest.TestCase):
+    """versions --audit-sources: cross-check both registries, catching stale
+    mirrors even when the local version is itself outdated."""
+
+    class _Maven:
+        def get_latest_version(self, g, a):
+            return {'io.ktor': '3.5.1', 'org.cyclonedx.bom': '1.4.0',
+                    'org.old': '2.0.0'}.get(g)
+
+    class _Portal:
+        def get_latest_version(self, g, a):
+            return {'org.cyclonedx.bom': '3.3.0', 'org.gone': '2.5.0'}.get(g)
+
+    CATALOG = (
+        '[versions]\n'
+        '# https://mvnrepository.com/artifact/io.ktor/ktor-server-core-jvm @*\n'
+        'ktor = "3.5.1"\n'
+        '# https://mvnrepository.com/artifact/org.cyclonedx.bom/org.cyclonedx.bom.gradle.plugin @*\n'
+        'cdx_wrong = "2.0.0"\n'
+        '# https://plugins.gradle.org/plugin/org.cyclonedx.bom @*\n'
+        'cdx_right = "3.3.0"\n'
+        '# https://mvnrepository.com/artifact/org.old/lib @*\n'
+        'oldlib = "5.0.0"\n'
+        '# https://mvnrepository.com/artifact/org.gone/org.gone.gradle.plugin @*\n'
+        'gone = "1.0.0"\n'
+        'jdk = "{{ jdk_version }}"\n'
+    )
+
+    def _audit(self):
+        f = Path(tempfile.mkdtemp()) / 'libs.versions.toml'
+        f.write_text(self.CATALOG, encoding='utf-8')
+        self.addCleanup(shutil.rmtree, f.parent, ignore_errors=True)
+        res = gradleInit.audit_version_sources(
+            gradleInit.VersionManager(f), self._Maven(), self._Portal())
+        return {r['name']: r for r in res}
+
+    def test_verdicts(self):
+        by = self._audit()
+        self.assertEqual(by['ktor']['verdict'], 'OK')
+        # KEY CASE: local version itself outdated, still detected via cross-check
+        self.assertEqual(by['cdx_wrong']['verdict'], 'SWITCH')
+        self.assertEqual(by['cdx_wrong']['suggested_url'],
+                         'https://plugins.gradle.org/plugin/org.cyclonedx.bom')
+        self.assertEqual(by['cdx_right']['verdict'], 'OK')
+        self.assertIn('behind', by['cdx_right']['message'])
+        self.assertEqual(by['oldlib']['verdict'], 'STALE')
+        self.assertEqual(by['gone']['verdict'], 'SWITCH')
+        self.assertNotIn('jdk', by)  # templated entries skipped
+
+    def test_finding_count(self):
+        by = self._audit()
+        findings = [r for r in by.values() if r['verdict'] in ('SWITCH', 'STALE')]
+        self.assertEqual(len(findings), 3)
+
 
 # ============================================================================
 # Test Runner

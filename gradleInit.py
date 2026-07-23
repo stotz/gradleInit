@@ -8,7 +8,7 @@ Architecture: Core + Optional Modules
 - Git required for templates (already a requirement)
 - Modules auto-download on demand
 
-Version: 1.12.6
+Version: 1.12.7
 Author: Urs Stotz
 License: MIT
 """
@@ -1708,7 +1708,9 @@ class VersionConstraintChecker:
 class VersionManager:
     """Manage dependency versions in libs.versions.toml"""
 
-    URL_PATTERN = re.compile(r'#\s*(https://mvnrepository\.com/artifact/[^\s]+)(?:\s+@(\S+))?')
+    URL_PATTERN = re.compile(
+        r'#\s*(https://(?:mvnrepository\.com/artifact|plugins\.gradle\.org/plugin)/[^\s]+)'
+        r'(?:\s+@(\S+))?')
     VERSION_PATTERN = re.compile(r'^(\w[\w\-_]*)\s*=\s*"([^"]+)"')
 
     def __init__(self, toml_path: Path):
@@ -1780,15 +1782,20 @@ class VersionManager:
         return None
 
     def extract_artifact_coords(self, url: str) -> Tuple[str, str]:
-        """Extract groupId and artifactId from Maven URL"""
-        # https://mvnrepository.com/artifact/org.jetbrains.kotlin/kotlin-stdlib
+        """Extract groupId and artifactId from a Maven or Plugin Portal URL"""
         import re
+        # https://plugins.gradle.org/plugin/org.cyclonedx.bom -> plugin marker
+        match = re.search(r'plugins\.gradle\.org/plugin/([^/\s@]+)', url)
+        if match:
+            plugin_id = match.group(1)
+            return (plugin_id, f'{plugin_id}.gradle.plugin')
+        # https://mvnrepository.com/artifact/org.jetbrains.kotlin/kotlin-stdlib
         match = re.search(r'/artifact/([^/]+)/([^/\s@]+)', url)
         if match:
             return (match.group(1), match.group(2))
         return ('', '')
 
-    def check_updates(self, maven_central=None, include_recent: bool = False, recent_hours: int = 48, force_latest: bool = False) -> List[Dict[str, Any]]:
+    def check_updates(self, maven_central=None, include_recent: bool = False, recent_hours: int = 48, force_latest: bool = False, plugin_portal=None) -> List[Dict[str, Any]]:
         """
         Check for available updates.
 
@@ -1858,32 +1865,60 @@ class VersionManager:
                 results.append(result)
                 continue
 
+            # Choose the resolver for this entry: Plugin-Portal URLs resolve
+            # against the Portal's Maven repository (plugins.gradle.org/m2),
+            # everything else against Maven Central. Some plugins publish
+            # current releases only to the Portal while Maven Central carries
+            # stale mirrors (e.g. org.cyclonedx.bom: 1.4.0 there, current on
+            # the Portal).
+            _is_portal = 'plugins.gradle.org' in (entry.url or '')
+            resolver = plugin_portal if _is_portal else maven_central
+            _source = 'Gradle Plugin Portal' if _is_portal else 'Maven Central'
+            if _is_portal and resolver is None and maven_central is not None:
+                result['status'] = 'SKIP'
+                result['message'] = ('Gradle Plugin Portal resolver not available - '
+                                     'run: gradleInit modules --update')
+                results.append(result)
+                continue
+
             # Try to get best matching version
-            if maven_central:
+            if resolver:
                 group_id, artifact_id = self.extract_artifact_coords(entry.url)
                 if group_id and artifact_id:
                     try:
                         # First check if artifact exists at all
-                        all_versions = maven_central.get_versions(group_id, artifact_id, limit=1, include_prerelease=True)
+                        all_versions = resolver.get_versions(group_id, artifact_id, limit=1, include_prerelease=True)
 
                         if not all_versions:
-                            # Artifact not found on Maven Central
+                            # Artifact not found at the configured source. For
+                            # Gradle plugin markers, cross-check the Plugin
+                            # Portal: many plugins are published only there.
+                            _hint = ''
+                            if (not _is_portal and plugin_portal is not None
+                                    and artifact_id.endswith('.gradle.plugin')):
+                                try:
+                                    _pl = plugin_portal.get_latest_version(group_id, artifact_id)
+                                except Exception:
+                                    _pl = None
+                                if _pl:
+                                    _hint = (f'; found on Gradle Plugin Portal (latest {_pl}) - '
+                                             f'switch the URL to https://plugins.gradle.org/plugin/{group_id}')
                             result['status'] = 'NOT_FOUND'
-                            result['message'] = f'not on Maven Central - check manually: {entry.url}'
+                            result['message'] = f'not on {_source} - check manually: {entry.url}{_hint}'
                             results.append(result)
                             continue
 
                         # For @* (latest), get latest stable version with age info
                         if ctype == 'latest':
-                            version_info = maven_central.get_version_info(group_id, artifact_id)
+                            version_info = resolver.get_version_info(group_id, artifact_id)
                             if version_info:
                                 latest = version_info.get('version')
                                 result['age_hours'] = version_info.get('age_hours')
                             else:
-                                latest = maven_central.get_latest_version(group_id, artifact_id)
+                                latest = resolver.get_latest_version(group_id, artifact_id)
                         else:
                             # For constraints, find best matching version
-                            latest = maven_central.get_matching_version(
+                            latest = resolver.get_matching_version(
                                 group_id, artifact_id,
                                 ctype, cvalue,
                                 entry.current_version
@@ -1894,6 +1929,26 @@ class VersionManager:
                         if latest is None:
                             result['status'] = 'VIOLATE'
                             result['message'] = f'no version satisfies @{constraint}'
+                        elif VersionConstraintChecker.compare_versions(latest, entry.current_version) < 0:
+                            # The source's newest release is older than what we
+                            # already have - impossible for an authoritative,
+                            # maintained registry. The project is most likely
+                            # published elsewhere (stale mirror).
+                            _hint = ''
+                            if (not _is_portal and plugin_portal is not None
+                                    and artifact_id.endswith('.gradle.plugin')):
+                                try:
+                                    _pl = plugin_portal.get_latest_version(group_id, artifact_id)
+                                except Exception:
+                                    _pl = None
+                                if _pl and VersionConstraintChecker.compare_versions(_pl, entry.current_version) >= 0:
+                                    _hint = (f'; Gradle Plugin Portal has {_pl} - switch the URL to '
+                                             f'https://plugins.gradle.org/plugin/{group_id}')
+                            result['status'] = 'STALE_SOURCE'
+                            result['message'] = (f'{_source} lists {latest} as newest, OLDER than '
+                                                 f'current {entry.current_version} - the registry '
+                                                 f'looks like a stale mirror; find the maintained '
+                                                 f'source{_hint}')
                         elif latest == entry.current_version:
                             result['status'] = 'CURRENT'
                             result['message'] = 'up to date'
@@ -3012,6 +3067,10 @@ class DynamicCLIBuilder:
         versions_parser.add_argument('--latest', action='store_true',
                                       help='Force every URL-backed entry to the newest release, '
                                            'ignoring @pin (used to refresh template catalogs)')
+        versions_parser.add_argument('--audit-sources', action='store_true',
+                                      help='Cross-check every entry against BOTH registries '
+                                           '(Maven Central and Gradle Plugin Portal) to detect '
+                                           'stale mirrors and wrong source URLs')
         versions_parser.add_argument('dependency', nargs='?',
                                       help='Specific dependency to update (optional)')
 
@@ -5417,6 +5476,110 @@ def _select_gradle_target(current: str, available: List[str], policy: str) -> Op
     return best
 
 
+def audit_version_sources(manager: 'VersionManager', maven_central=None,
+                          plugin_portal=None) -> List[Dict[str, Any]]:
+    """Cross-check every URL-backed catalog entry against BOTH registries
+    (Maven Central and the Gradle Plugin Portal).
+
+    This catches stale mirrors even when the local version is itself outdated:
+    the configured source is compared with the other registry, not only with
+    the local version. Verdicts:
+        OK      configured source is authoritative (>= other registry)
+        SWITCH  the other registry is newer or the configured one lacks the
+                artifact entirely -> the URL points at the wrong registry
+        STALE   the configured source's newest is older than our current
+                version (impossible for a maintained registry)
+        UNKNOWN artifact found on neither reachable registry
+    """
+    results: List[Dict[str, Any]] = []
+    cmp = VersionConstraintChecker.compare_versions
+    for entry in manager.entries:
+        if not entry.url or '{{' in entry.current_version:
+            continue
+        group_id, artifact_id = manager.extract_artifact_coords(entry.url)
+        if not group_id:
+            continue
+        is_portal = 'plugins.gradle.org' in entry.url
+        primary = plugin_portal if is_portal else maven_central
+        secondary = maven_central if is_portal else plugin_portal
+        p_name = 'Gradle Plugin Portal' if is_portal else 'Maven Central'
+        s_name = 'Maven Central' if is_portal else 'Gradle Plugin Portal'
+
+        def _latest(client):
+            if client is None:
+                return None
+            try:
+                return client.get_latest_version(group_id, artifact_id)
+            except Exception:
+                return None
+
+        p_latest = _latest(primary)
+        s_latest = _latest(secondary)
+
+        r: Dict[str, Any] = {
+            'name': entry.name, 'current': entry.current_version,
+            'source': p_name, 'source_latest': p_latest,
+            'other': s_name, 'other_latest': s_latest,
+            'suggested_url': None,
+        }
+        if p_latest is None and s_latest is None:
+            r['verdict'] = 'UNKNOWN'
+            if primary is None and secondary is None:
+                r['message'] = 'no resolver available (gradleInit modules --update)'
+            else:
+                r['message'] = f'not found on either registry ({p_name}, {s_name})'
+        elif p_latest is None:
+            r['verdict'] = 'SWITCH'
+            r['suggested_url'] = (f'https://plugins.gradle.org/plugin/{group_id}'
+                                  if secondary is plugin_portal else
+                                  f'https://mvnrepository.com/artifact/{group_id}/{artifact_id}')
+            r['message'] = f'not on configured {p_name}; {s_name} has {s_latest}'
+        elif s_latest is not None and cmp(s_latest, p_latest) > 0:
+            r['verdict'] = 'SWITCH'
+            r['suggested_url'] = (f'https://plugins.gradle.org/plugin/{group_id}'
+                                  if secondary is plugin_portal else
+                                  f'https://mvnrepository.com/artifact/{group_id}/{artifact_id}')
+            r['message'] = (f'configured {p_name} is behind: {p_latest} vs '
+                            f'{s_name} {s_latest}')
+        elif cmp(entry.current_version, p_latest) > 0:
+            r['verdict'] = 'STALE'
+            r['message'] = (f'current {entry.current_version} is newer than {p_name} '
+                            f'latest {p_latest} - configured source is a stale mirror')
+        else:
+            r['verdict'] = 'OK'
+            note = ''
+            if s_latest is not None and cmp(p_latest, s_latest) > 0:
+                note = f'; {s_name} mirror is behind ({s_latest}) - correctly ignored'
+            r['message'] = f'{p_name} {p_latest}{note}'
+        results.append(r)
+    return results
+
+
+def print_source_audit(results: List[Dict[str, Any]]) -> int:
+    """Print an audit table; return the number of actionable findings."""
+    if not results:
+        print_warning('No URL-backed literal entries to audit')
+        return 0
+    width = max(len(r['name']) for r in results)
+    counts = {'OK': 0, 'SWITCH': 0, 'STALE': 0, 'UNKNOWN': 0}
+    for r in results:
+        counts[r['verdict']] += 1
+        tag = {'OK': '[OK]    ', 'SWITCH': '[SWITCH]',
+               'STALE': '[STALE!]', 'UNKNOWN': '[??]    '}[r['verdict']]
+        print(f"  {tag} {r['name']:<{width}} : {r['message']}")
+        if r.get('suggested_url'):
+            print(f"  {'':8} {'':{width}}   -> {r['suggested_url']}")
+    print()
+    print(f"{len(results)} audited: {counts['OK']} ok, {counts['SWITCH']} switch, "
+          f"{counts['STALE']} stale, {counts['UNKNOWN']} unknown")
+    findings = counts['SWITCH'] + counts['STALE']
+    if findings:
+        print_warning(f'{findings} source finding(s) need action')
+    else:
+        print_success('all configured sources are authoritative')
+    return findings
+
+
 def handle_versions_command(args: argparse.Namespace) -> int:
     """
     Handle versions command - Check and update dependency versions.
@@ -5450,6 +5613,7 @@ def handle_versions_command(args: argparse.Namespace) -> int:
 
     # Try to load Maven Central module
     maven_central = None
+    plugin_portal = None
     try:
         # Try to import the module
         paths = GradleInitPaths()
@@ -5460,21 +5624,36 @@ def handle_versions_command(args: argparse.Namespace) -> int:
                 maven_central = MavenCentral()
             except ImportError:
                 pass
+            try:
+                from resolvers.gradle_plugin_portal import GradlePluginPortal
+                plugin_portal = GradlePluginPortal()
+            except ImportError:
+                pass
     except Exception:
         pass
+
+    # Source audit mode: compare every entry against both registries and exit
+    if getattr(args, 'audit_sources', False):
+        if maven_central is None and plugin_portal is None:
+            print_error('No resolvers available - run: gradleInit modules --update')
+            return 1
+        audit = audit_version_sources(manager, maven_central, plugin_portal)
+        findings = print_source_audit(audit)
+        return 1 if findings else 0
 
     # Get recent_hours from config (default 48)
     config = load_config(paths.config_file)
     recent_hours = config.get('versions', {}).get('maven_recent_hours', 48)
     include_recent = getattr(args, 'include_recent', False)
     force_latest = getattr(args, 'latest', False)
-    results = manager.check_updates(maven_central, include_recent=include_recent, recent_hours=recent_hours, force_latest=force_latest)
+    results = manager.check_updates(maven_central, include_recent=include_recent, recent_hours=recent_hours, force_latest=force_latest, plugin_portal=plugin_portal)
 
     # Categorize results
     updates = []
     pinned = []
     skipped = []
     templated = []
+    stale = []
     current = []
     violations = []
     too_recent = []
@@ -5490,6 +5669,8 @@ def handle_versions_command(args: argparse.Namespace) -> int:
             skipped.append(r)
         elif r['status'] == 'TEMPLATED':
             templated.append(r)
+        elif r['status'] == 'STALE_SOURCE':
+            stale.append(r)
         elif r['status'] == 'CURRENT':
             current.append(r)
         elif r['status'] == 'VIOLATE':
@@ -5549,6 +5730,8 @@ def handle_versions_command(args: argparse.Namespace) -> int:
             print(f"  [SKIP]    {name}: {curr} ({r['message']})")
         elif r['status'] == 'TEMPLATED':
             print(f"  [TEMPL]   {name}: {curr} ({r['message']})")
+        elif r['status'] == 'STALE_SOURCE':
+            print(f"  [STALE!]  {name}: {curr} ({r['message']})")
         elif r['status'] == 'NOT_FOUND':
             print(f"  [SKIP]    {name}: {curr} ({r['message']})")
         elif r['status'] == 'TOO_RECENT':
@@ -5587,6 +5770,8 @@ def handle_versions_command(args: argparse.Namespace) -> int:
         summary_parts.append(f"{len(skipped)} skipped")
     if templated:
         summary_parts.append(f"{len(templated)} templated")
+    if stale:
+        summary_parts.append(f"{len(stale)} STALE SOURCE(S) - action needed")
     if current:
         summary_parts.append(f"{len(current)} current")
     if violations:
