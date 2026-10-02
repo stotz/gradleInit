@@ -842,7 +842,7 @@ class TestStaleConfigGeneration(unittest.TestCase):
     so it never exercised this bug.
     """
 
-    TEMPLATES = ['kotlin-single', 'kotlin-multi', 'ktor', 'springboot', 'kotlin-javaFX']
+    TEMPLATES = ['kotlin-single', 'kotlin-multi', 'ktor', 'springboot', 'kotlin-javaFX', 'java-library']
     VERSION_KEYS = ('kotlin_version', 'jdk_version', 'gradle_version')
 
     @classmethod

@@ -84,7 +84,9 @@ BLOCK_LABELS = {
 SPAN_RE = re.compile(r"<!--v:([A-Za-z0-9_\-]+)-->(.*?)<!--/v-->", re.S)
 VREGION_RE = re.compile(r"<!--\s*vregion:begin\s*-->(.*?)<!--\s*vregion:end\s*-->", re.S)
 BLOCK_RE = re.compile(r"<!--\s*versions:begin\s*-->(.*?)<!--\s*versions:end\s*-->", re.S)
-VERSION_TOKEN_RE = re.compile(r"\d+\.\d+(?:\.\d+)?")
+# Version token: X.Y[.Z] or a bare major (JavaFX publishes "27"). Bounded so a
+# bare major is not matched inside a longer token.
+VERSION_TOKEN_RE = re.compile(r"(?<![\w.])\d+(?:\.\d+){0,2}(?![\w.])")
 WRAPPER_VERSION_RE = re.compile(r"gradle-(\d+\.\d+(?:\.\d+)?)-")
 
 
@@ -102,6 +104,18 @@ def _write_lf(path: Path, text: str) -> None:
     """
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
     path.write_bytes(normalized.encode("utf-8"))
+
+
+JINJA_STATEMENT_RE = re.compile(r"^\s*\{%.*?%\}\s*$")
+
+
+def load_template_toml(toml_path: Path) -> dict:
+    """toml.load() for a template catalog: Jinja statement lines such as
+    '{% if enable_kover %}' (feature gating) are not TOML and are dropped;
+    comments and quoted '{{ ... }}' values are valid TOML and stay."""
+    text = toml_path.read_text(encoding="utf-8")
+    kept = [ln for ln in text.splitlines() if not JINJA_STATEMENT_RE.match(ln)]
+    return toml.loads("\n".join(kept))
 
 
 def parse_ssot(versions_dir: Path) -> Tuple[Dict[str, str], List[dict]]:
@@ -142,7 +156,7 @@ def check_toml_versions(toml_path: Path, ssot: Dict[str, str],
                         overrides: List[dict], template: str) -> List[str]:
     """Verify a template catalog's versions against the SSoT."""
     errors: List[str] = []
-    data = toml.load(toml_path)
+    data = load_template_toml(toml_path)
     for alias, value in data.get("versions", {}).items():
         if alias in SKIP_ALIASES:
             continue

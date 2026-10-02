@@ -3023,6 +3023,9 @@ class DynamicCLIBuilder:
 
         # Version arguments
         versions_group = init_parser.add_argument_group('Version arguments')
+        versions_group.add_argument('--gradle-distribution-url', dest='gradle_distribution_url',
+                                    help='Wrapper distributionUrl (internal mirror or file:// path) '
+                                         'for offline builds; passed to gradle wrapper')
         versions_group.add_argument('--gradle-version',
                                     help='Gradle version (e.g. 9.2.0) or "latest"')
         versions_group.add_argument('--select-gradle-version', action='store_true',
@@ -3202,7 +3205,10 @@ class DynamicCLIBuilder:
 
             if arg.type == 'boolean':
                 kwargs['action'] = 'store_true'
-                # Don't set default - let ContextBuilder handle it with proper priority
+                # store_true defaults to False, which would land in the context
+                # before the template default and silently override a
+                # 'default: true' (e.g. enable_kover). None = "not given".
+                kwargs['default'] = None
             elif arg.type == 'choice':
                 kwargs['choices'] = arg.choices
                 # Don't set default - let ContextBuilder handle it with proper priority
@@ -3306,6 +3312,10 @@ class ContextBuilder:
         context['timestamp'] = datetime.now().isoformat()
         context['year'] = datetime.now().year
         context['date'] = datetime.now().strftime('%Y-%m-%d')
+        # group_path: slash form of the group for Java package directories
+        # (src/main/java/{{ group_path }}/...). A Jinja filter would need '|' in
+        # the template path, which is an illegal file-name character on Windows.
+        context['group_path'] = str(context.get('group', '') or '').replace('.', '/')
 
         # 6. Template-specific defaults
         template_args = self.template_metadata.get_arguments()
@@ -3317,6 +3327,7 @@ class ContextBuilder:
                     # Variables without defaults get empty string (allows optional variables)
                     context[arg.context_key] = ""
 
+        context['group_path'] = str(context.get('group', '') or '').replace('.', '/')
         return context
 
     @staticmethod
@@ -3551,10 +3562,17 @@ class ProjectGenerator:
             template_metadata: Optional template metadata for hint compilation
         """
         self.template_path = template_path
+        # group_path: slash form of the group for Java package directories;
+        # derived here so it is available however the context was assembled.
+        if 'group_path' not in context:
+            context['group_path'] = str(context.get('group', '') or '').replace('.', '/')
         self.context = context
         self.target_path = target_path
         self.template_metadata = template_metadata
         self.jinja_env = setup_jinja2_environment(template_path, context)
+        # Optional wrapper distributionUrl (internal mirror / file path) for
+        # offline builds; forwarded to 'gradle wrapper'.
+        self.gradle_distribution_url: Optional[str] = context.get('gradle_distribution_url') or None
 
     def generate(self) -> bool:
         """
@@ -3906,6 +3924,8 @@ class ProjectGenerator:
 
             # Step 2: Generate wrapper
             cmd_list = ['gradle', 'wrapper', '--gradle-version', gradle_version]
+            if self.gradle_distribution_url:
+                cmd_list += ['--gradle-distribution-url', self.gradle_distribution_url]
             print_info(f"Executing: {' '.join(cmd_list)}")
             print_info(f"Working directory: {self.target_path}")
 
@@ -4035,6 +4055,10 @@ class SubprojectGenerator:
         """
         self.template_path = template_path
         self.template_metadata = template_metadata
+        # group_path: slash form of the group for Java package directories;
+        # derived here so it is available however the context was assembled.
+        if 'group_path' not in context:
+            context['group_path'] = str(context.get('group', '') or '').replace('.', '/')
         self.context = context
         self.root_path = root_path
         self.subproject_name = subproject_name
@@ -4137,7 +4161,13 @@ class SubprojectGenerator:
             if item.name in raw_copy and self._should_skip(item.name):
                 continue
 
-            target_item = target_dir / item.name
+            # Render template variables in the name (e.g. {{ group_path }} for
+            # Java package directories), like ProjectGenerator does for init.
+            try:
+                rendered_name = self.jinja_env.from_string(item.name).render(**self.context)
+            except jinja2.TemplateError:
+                rendered_name = item.name
+            target_item = target_dir / rendered_name
 
             if item.is_dir():
                 target_item.mkdir(parents=True, exist_ok=True)
@@ -4650,6 +4680,12 @@ def validate_value_against_hint(value: str, hint: 'TemplateVariable') -> Tuple[b
             error_msg = f"Value '{value}' does not match pattern: {hint.regex_pattern}"
             if hint.help_text:
                 error_msg += f"\n  Help: {hint.help_text}"
+            if getattr(hint, 'name', '') == 'jdk_version':
+                # The hint enforces the modern-JDK policy for new projects. A
+                # legacy toolchain (migrations) is a deliberate catalog edit.
+                error_msg += ("\n  Legacy toolchain (e.g. 8/11/17): generate with the default, then set "
+                              "'jdk' in gradle/libs.versions.toml. The build/daemon JDK is "
+                              "independent (gradle/gradle-daemon-jvm.properties).")
             return False, error_msg
     except re.error as e:
         # Invalid regex pattern in template

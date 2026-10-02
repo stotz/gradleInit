@@ -12,12 +12,12 @@
 
 
 
-## Aktueller Stand (v0063)
+## Aktueller Stand (v0064)
 
 gradleInit ist ein Python-basiertes Tool zur Generierung von Kotlin/Gradle-Projekten aus Templates.
 Verwendet Jinja2 fuer Template-Verarbeitung mit inline Hint-System.
-SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.7; die 4-stellige AI-Versionierung
-ist davon getrennt und laeuft linear (zuletzt v0063).
+SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.9; die 4-stellige AI-Versionierung
+ist davon getrennt und laeuft linear (zuletzt v0064).
 
 Hinweis zur History: Die Versionstabelle unten ist zwischen v0023 und v0024 unvollstaendig.
 Einige Features (erweiterte Hint-Syntax mit Regex, Template-Compilation-Cache) sind im Code
@@ -38,6 +38,60 @@ Hauptfeatures:
 - --latest Flag fuer @* statt @pin Version-Constraints
 
 ## Aktuelle Arbeit
+
+v0064: Template-Runde A+B (Brownfield-/Enterprise-Tauglichkeit) + java-library
+
+Ausloeser: panoramix-Analyse (Maven/JDK 8 -> Gradle 9/JDK 25). Umgesetzt wurden die
+Punkte, die jedes Projekt betreffen (A) und billige Opt-ins (B); projektspezifisches
+bleibt Workaround.
+
+- A1 buildSrc entkoppelt: buildSrc/build.gradle.kts (multiproject-root, kotlin-multi)
+  pinnt keine Toolchain mehr - buildSrc kompiliert mit dem Daemon-JDK. Neu
+  gradle/gradle-daemon-jvm.properties in allen Templates (toolchainVersion = Projekt-JDK
+  wenn >=17, sonst 25). Damit "Daemon 25, Toolchain 8" ohne Verrenkung.
+- A2 Encoding: options.encoding = "UTF-8" fuer JavaCompile/Javadoc in den Conventions
+  und allen Standalone-Builds (javac nahm bisher das Plattform-Encoding).
+- A3 Conventions geschichtet: neu java-common-conventions (Toolchain aus Katalog,
+  Encoding, JUnit-Platform-Setup, reproduzierbare Archive, Manifest/Git-Info);
+  kotlin-common-conventions wendet sie an und ergaenzt nur Kotlin. Git-Haertung dabei
+  mitgezogen (Voll-SHA statt --short, isIgnoreExitValue auf allen Execs).
+  Neues Template java-library (standalone + subproject): java-library-Plugin, JUnit 6 +
+  AssertJ + junit-platform-launcher; Java-Package-Pfade ueber neue Kontextvariable
+  group_path (src/main/java/{{ group_path }}/...). junit-platform-launcher in alle
+  Kataloge nachgezogen (Gradle 9 verlangt ihn explizit).
+- A4 Repository-Variablen: repository_url / plugin_repository_url (--config) in allen
+  settings-Dateien, beiden buildSrc-settings und Standalone-Builds; Default unveraendert
+  Maven Central / Plugin Portal.
+- B5 Opt-outs enable_kover / enable_sbom (Default true) in allen Templates: Alias,
+  Block UND Katalog-Eintraege gated. Gleicher Mechanismus schliesst den clikt-Parity-Gap
+  (kotlin-single merged clikt nur noch bei enable_clikt).
+- B6 init --gradle-distribution-url (an gradle wrapper durchgereicht, Offline-Mirror).
+- B7 jdk-Hint-Fehlermeldung nennt den Legacy-Weg (Katalog editieren; Daemon unabhaengig).
+
+Beim Verifizieren gefundene und behobene Fehler:
+- Boolean-Template-Argumente konnten nie 'default: true' haben: der auto-erzeugte
+  store_true-Flag (Default False) landete vor den Template-Defaults im Kontext. Fix:
+  Flag-Default None. (Bei enable_clikt nie aufgefallen, Default ohnehin false.)
+- SubprojectGenerator renderte keine Pfadnamen und baut seinen Kontext nicht ueber
+  build_context: beide Generatoren leiten group_path selbst ab; Subproject-Walker
+  rendert Namen wie init.
+- version_sync stuerzte an {% if %}-Zeilen in Template-Katalogen ab (toml-Parser):
+  Jinja-Statement-Zeilen werden vor dem Parsen verworfen (load_template_toml).
+- Vorbestehend in 1.12.9: version_sync --check rot, weil der README-Block "JavaFX: 27"
+  (reine Major-Zahl) vom Versions-Regex nicht erkannt wurde. Regex gebounded erweitert.
+
+Verifiziert: alle 7 Templates generieren; Opt-outs ohne Reste in Katalog+Build;
+Offline-Variante nur interne URLs; Defaults unveraendert; multiproject-root mit
+java-library/kotlin-single/ktor: Conventions geschichtet, kein Toolchain-Pin,
+Daemon-Datei, Package-Pfade gerendert, alle libs.*-Verweise loesen auf; Suite 150 passed
+(12 Subtests inkl. java-library); version_sync --check gruen; alles LF.
+OFFEN: Gradle-Builds auf der Zielmaschine - java-library standalone + Subprojekt, und ein
+multiproject-root mit jdk = "8" im Katalog (Kernbeweis fuer A1).
+Workarounds fuer panoramix (nicht Template): init in bestehendes Repo (generieren +
+kopieren), WAR-Inhaltsdiff statt Byte-Gleichheit, JaCorb-IDL-Task in buildSrc,
+charset=latin1 fuer Properties lokal, JUnit-4-Bestand in eigenes SourceSet.
+Betroffene Repos: gradleInitTemplates (alle Templates, neu java-library), gradleInit
+(gradleInit.py, tools/version_sync.py, test_gradleInit.py).
 
 v0063: --audit-sources --fix (SWITCH-Befunde automatisch anwenden)
 
