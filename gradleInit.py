@@ -46,7 +46,7 @@ SCOOP_DIR = os.environ.get('SCOOP')
 SCOOP_SHIMS_DIR = os.path.join(SCOOP_DIR, 'shims') if SCOOP_DIR else None
 
 # Default Gradle version
-DEFAULT_GRADLE_VERSION = "9.6.1"
+DEFAULT_GRADLE_VERSION = "9.8.0"
 GRADLE_VERSIONS_URL = "https://services.gradle.org/versions/all"
 
 # Default project values for a fresh config; also used as fallbacks when an older
@@ -56,7 +56,7 @@ DEFAULT_PROJECT_DEFAULTS = {
     'group': 'com.example',
     'version': '0.1.0',
     'gradle_version': DEFAULT_GRADLE_VERSION,
-    'kotlin_version': '2.4.10',
+    'kotlin_version': '2.4.20',
     'jdk_version': '25',
 }
 
