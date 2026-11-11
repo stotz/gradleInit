@@ -3562,6 +3562,16 @@ class ProjectGenerator:
             template_metadata: Optional template metadata for hint compilation
         """
         self.template_path = template_path
+        # Template argument defaults (TEMPLATE.md), applied here so a context
+        # assembled without the ContextBuilder (tests, scripted use) still has
+        # every variable the templates reference (e.g. enable_kover=true).
+        if template_metadata is not None:
+            try:
+                for arg in template_metadata.get_arguments():
+                    if arg.context_key not in context:
+                        context[arg.context_key] = arg.default if arg.default is not None else ""
+            except Exception:
+                pass
         # group_path: slash form of the group for Java package directories;
         # derived here so it is available however the context was assembled.
         if 'group_path' not in context:
@@ -3713,7 +3723,13 @@ class ProjectGenerator:
             # Write rendered content
             write_text_lf(target_file, content)
 
-            print_info(f"  [OK] {rel_path}")
+            # Log the rendered path (e.g. src/main/java/com/example/X.java), not
+            # the template path with its {{ group_path }} placeholder.
+            try:
+                shown = target_file.relative_to(self.target_path)
+            except ValueError:
+                shown = rel_path
+            print_info(f"  [OK] {shown}")
 
         except jinja2.UndefinedError as e:
             print_error(f"Undefined variable in {source_file.name}: {e}")
@@ -3866,159 +3882,94 @@ class ProjectGenerator:
 
     def _generate_gradle_wrapper(self):
         """
-        Generate Gradle Wrapper using the reliable empty-file method.
+        Generate the Gradle Wrapper in an empty scratch project and copy the
+        four wrapper files into the target.
 
-        This method:
-        1. Creates empty build.gradle.kts and settings.gradle.kts
-        2. Runs 'gradle wrapper' to generate wrapper files
-        3. Deletes the empty placeholder files
-        4. Lets the template system generate the real files
-
-        This avoids Constructor errors from incomplete/complex build files.
+        The wrapper is project-independent (gradlew, gradlew.bat,
+        gradle/wrapper/gradle-wrapper.jar and .properties), so there is no
+        reason to run 'gradle wrapper' inside the generated project: there it
+        would first configure the real build - compiling buildSrc with the
+        kotlin-dsl on a cold cache (60s+ in a multiproject) and tripping over
+        any build-file problem. In the scratch project the task is a few
+        seconds, deterministic, and cannot interfere with the generated files.
         """
-
-        # Check if wrapper already exists
         gradlew = self.target_path / ('gradlew.bat' if IS_WINDOWS else 'gradlew')
         if gradlew.exists():
             print_info("Gradle Wrapper already exists")
             return
 
-        build_file = self.target_path / 'build.gradle.kts'
-        settings_file = self.target_path / 'settings.gradle.kts'
+        gradle_version = self.context.get('gradle_version') or DEFAULT_GRADLE_VERSION
+        manual_hint = f"gradle wrapper --gradle-version {gradle_version}"
+        if self.gradle_distribution_url:
+            manual_hint += f" --gradle-distribution-url {self.gradle_distribution_url}"
 
-        # Remember if files existed before (from templates)
-        build_existed = build_file.exists()
-        settings_existed = settings_file.exists()
-
-        # Save content if files existed
-        build_content = build_file.read_text() if build_existed else None
-        settings_content = settings_file.read_text() if settings_existed else None
-
+        import tempfile
+        scratch = Path(tempfile.mkdtemp(prefix='gradleInit-wrapper-'))
         try:
-            # Get Gradle version from context (fallback to default)
-            gradle_version = self.context.get('gradle_version', DEFAULT_GRADLE_VERSION)
+            # Minimal valid project: an empty settings file is all Gradle needs.
+            write_text_lf(scratch / 'settings.gradle.kts', '')
 
-            # Step 1: Create empty placeholder files
-            if not build_existed:
-                build_file.touch()
-            else:
-                # Temporarily replace with empty file
-                write_text_lf(build_file, "")
-
-            if not settings_existed:
-                settings_file.touch()
-            else:
-                # Temporarily replace with empty file
-                write_text_lf(settings_file, "")
-
-            # Step 1.5: Stop Gradle daemon to clear cached Kotlin DSL
-            # This is CRITICAL to avoid Constructor errors from cached compilations
-            try:
-                print_info("Stopping Gradle daemon to clear cache...")
-                if IS_WINDOWS:
-                    subprocess.run('gradle --stop', shell=True, capture_output=True, timeout=10)
-                else:
-                    subprocess.run(['gradle', '--stop'], capture_output=True, timeout=10)
-            except Exception:
-                pass  # Ignore errors - daemon might not be running
-
-            # Step 2: Generate wrapper
-            cmd_list = ['gradle', 'wrapper', '--gradle-version', gradle_version]
+            # --no-daemon: a one-shot task; nothing to warm up and no stale
+            # daemon state to worry about. --quiet: errors only.
+            cmd_list = ['gradle', 'wrapper', '--gradle-version', gradle_version,
+                        '--no-daemon', '--quiet']
             if self.gradle_distribution_url:
                 cmd_list += ['--gradle-distribution-url', self.gradle_distribution_url]
+
             print_info(f"Executing: {' '.join(cmd_list)}")
-            print_info(f"Working directory: {self.target_path}")
-
-            # On Windows, use shell=True and string command to handle shims/wrappers
+            print_info(f"Scratch directory: {scratch}")
             if IS_WINDOWS:
-                cmd = ' '.join(cmd_list)
-                result = subprocess.run(
-                    cmd,
-                    cwd=self.target_path,
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                    shell=True
-                )
+                result = subprocess.run(' '.join(cmd_list), cwd=scratch, capture_output=True,
+                                        text=True, timeout=180, shell=True)
             else:
-                result = subprocess.run(
-                    cmd_list,
-                    cwd=self.target_path,
-                    capture_output=True,
-                    text=True,
-                    timeout=60
-                )
+                result = subprocess.run(cmd_list, cwd=scratch, capture_output=True,
+                                        text=True, timeout=180)
 
-            print_info(f"Process exit code: {result.returncode}")
-
-            # Show stdout if present
             if result.stdout and result.stdout.strip():
-                print_info("Standard output:")
                 for line in result.stdout.strip().split('\n'):
                     print(f"  {line}")
-
-            # Show stderr if present
-            if result.stderr and result.stderr.strip():
-                print_info("Error output:")
-                for line in result.stderr.strip().split('\n'):
-                    print(f"  {line}")
-
-            if result.returncode == 0:
-                print_success(f"Gradle Wrapper {gradle_version} generated")
-
-                # Step 3: Restore original files or delete placeholders
-                if build_existed and build_content:
-                    write_text_lf(build_file, build_content)
-                elif not build_existed:
-                    build_file.unlink()
-
-                if settings_existed and settings_content:
-                    write_text_lf(settings_file, settings_content)
-                elif not settings_existed:
-                    settings_file.unlink()
-            else:
+            if result.returncode != 0:
+                if result.stderr and result.stderr.strip():
+                    print_info("Error output:")
+                    for line in result.stderr.strip().split('\n'):
+                        print(f"  {line}")
                 print_warning("Gradle wrapper generation failed")
-                print_info(f"You can run manually: gradle wrapper --gradle-version {gradle_version}")
+                print_info(f"  You can run manually in the project: {manual_hint}")
+                return
 
-                # Restore original files on failure
-                if build_existed and build_content:
-                    write_text_lf(build_file, build_content)
-                if settings_existed and settings_content:
-                    write_text_lf(settings_file, settings_content)
+            wrapper_files = ['gradlew', 'gradlew.bat',
+                             'gradle/wrapper/gradle-wrapper.jar',
+                             'gradle/wrapper/gradle-wrapper.properties']
+            missing = [f for f in wrapper_files if not (scratch / f).exists()]
+            if missing:
+                print_warning(f"Gradle wrapper incomplete, missing: {', '.join(missing)}")
+                print_info(f"  You can run manually in the project: {manual_hint}")
+                return
+
+            for rel in wrapper_files:
+                src = scratch / rel
+                dst = self.target_path / rel
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+            # gradlew must be executable on POSIX; git tracks the mode bit.
+            try:
+                os.chmod(self.target_path / 'gradlew', 0o755)
+            except OSError:
+                pass
+            print_success(f"Gradle Wrapper {gradle_version} generated")
 
         except FileNotFoundError as e:
             print_warning(f"Gradle not found in PATH: {e}")
             print_info("  Install Gradle: https://gradle.org/install/")
-            gradle_version = self.context.get('gradle_version', DEFAULT_GRADLE_VERSION)
-            print_info(f"  Or run manually: gradle wrapper --gradle-version {gradle_version}")
-
-            # Restore original files on error
-            if build_existed and build_content:
-                write_text_lf(build_file, build_content)
-            if settings_existed and settings_content:
-                write_text_lf(settings_file, settings_content)
-
+            print_info(f"  Or run manually in the project: {manual_hint}")
         except subprocess.TimeoutExpired:
-            print_warning("Gradle wrapper generation timed out (60s)")
-            gradle_version = self.context.get('gradle_version', DEFAULT_GRADLE_VERSION)
-            print_info(f"  You can run manually: gradle wrapper --gradle-version {gradle_version}")
-
-            # Restore original files on error
-            if build_existed and build_content:
-                write_text_lf(build_file, build_content)
-            if settings_existed and settings_content:
-                write_text_lf(settings_file, settings_content)
-
+            print_warning("Gradle wrapper generation timed out (180s)")
+            print_info(f"  You can run manually in the project: {manual_hint}")
         except Exception as e:
-            print_warning(f"Unexpected error: {e}")
-            import traceback
-            traceback.print_exc()
-
-            # Restore original files on error
-            if build_existed and build_content:
-                write_text_lf(build_file, build_content)
-            if settings_existed and settings_content:
-                write_text_lf(settings_file, settings_content)
+            print_warning(f"Unexpected error during wrapper generation: {e}")
+            print_info(f"  You can run manually in the project: {manual_hint}")
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
 
 
 # ============================================================================
@@ -4055,6 +4006,16 @@ class SubprojectGenerator:
         """
         self.template_path = template_path
         self.template_metadata = template_metadata
+        # Template argument defaults (TEMPLATE.md), applied here so a context
+        # assembled without the ContextBuilder (tests, scripted use) still has
+        # every variable the templates reference (e.g. enable_kover=true).
+        if template_metadata is not None:
+            try:
+                for arg in template_metadata.get_arguments():
+                    if arg.context_key not in context:
+                        context[arg.context_key] = arg.default if arg.default is not None else ""
+            except Exception:
+                pass
         # group_path: slash form of the group for Java package directories;
         # derived here so it is available however the context was assembled.
         if 'group_path' not in context:
@@ -4208,8 +4169,12 @@ class SubprojectGenerator:
             content = template.render(**self.context)
             write_text_lf(target_file, content)
 
-            rel_path = source_file.relative_to(self.template_path)
-            print_info(f"  [OK] {rel_path}")
+            # Log the rendered path, not the template path with placeholders.
+            try:
+                shown = target_file.relative_to(self.target_path)
+            except ValueError:
+                shown = source_file.relative_to(self.template_path)
+            print_info(f"  [OK] {shown}")
 
         except Exception as e:
             print_error(f"Error rendering {source_file.name}: {e}")
@@ -4683,9 +4648,13 @@ def validate_value_against_hint(value: str, hint: 'TemplateVariable') -> Tuple[b
             if getattr(hint, 'name', '') == 'jdk_version':
                 # The hint enforces the modern-JDK policy for new projects. A
                 # legacy toolchain (migrations) is a deliberate catalog edit.
-                error_msg += ("\n  Legacy toolchain (e.g. 8/11/17): generate with the default, then set "
-                              "'jdk' in gradle/libs.versions.toml. The build/daemon JDK is "
-                              "independent (gradle/gradle-daemon-jvm.properties).")
+                error_msg += ("\n  Legacy toolchain (e.g. 8/11): generate with the default, then in "
+                              "gradle/libs.versions.toml set 'jdk', and pin the test stack to the "
+                              "last Java-8 line: junit = \"5.13.4\" with junit-platform-launcher "
+                              "version = \"1.13.4\" (JUnit 6 requires Java 17). The build/daemon JDK "
+                              "is independent (gradle/gradle-daemon-jvm.properties); make the "
+                              "toolchain JDK discoverable via "
+                              "org.gradle.java.installations.fromEnv=JAVA_HOME_8_X64.")
             return False, error_msg
     except re.error as e:
         # Invalid regex pattern in template

@@ -404,11 +404,12 @@ class TestTemplateGeneration(unittest.TestCase):
         print(f"{'#' * 70}")
         project_path = self._generate_project('kotlin-multi', 'build-kotlin-multi')
 
-        # kotlin-multi uses buildSrc and doesn't generate gradlew
-        # Skip if wrapper doesn't exist
+        # The wrapper is generated in a scratch project (independent of buildSrc),
+        # so it is only missing when no 'gradle' is installed or the distribution
+        # could not be fetched. Then there is nothing to build with.
         gradlew = project_path / ('gradlew.bat' if os.name == 'nt' else 'gradlew')
         if not gradlew.exists():
-            self.skipTest("kotlin-multi uses buildSrc - no wrapper generated")
+            self.skipTest("no Gradle wrapper (gradle not installed or distribution unavailable)")
 
         # Run gradle build (builds all modules)
         result = self._run_gradle(project_path, 'build')
@@ -426,11 +427,12 @@ class TestTemplateGeneration(unittest.TestCase):
         print(f"{'#' * 70}")
         project_path = self._generate_project('kotlin-multi', 'deps-kotlin-multi')
 
-        # kotlin-multi uses buildSrc and doesn't generate gradlew
-        # Skip if wrapper doesn't exist
+        # The wrapper is generated in a scratch project (independent of buildSrc),
+        # so it is only missing when no 'gradle' is installed or the distribution
+        # could not be fetched. Then there is nothing to build with.
         gradlew = project_path / ('gradlew.bat' if os.name == 'nt' else 'gradlew')
         if not gradlew.exists():
-            self.skipTest("kotlin-multi uses buildSrc - no wrapper generated")
+            self.skipTest("no Gradle wrapper (gradle not installed or distribution unavailable)")
 
         # Build and run app
         result = self._run_gradle(project_path, ':app:build')

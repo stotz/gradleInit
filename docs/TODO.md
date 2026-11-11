@@ -12,12 +12,12 @@
 
 
 
-## Aktueller Stand (v0064)
+## Aktueller Stand (v0065)
 
 gradleInit ist ein Python-basiertes Tool zur Generierung von Kotlin/Gradle-Projekten aus Templates.
 Verwendet Jinja2 fuer Template-Verarbeitung mit inline Hint-System.
-SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.9; die 4-stellige AI-Versionierung
-ist davon getrennt und laeuft linear (zuletzt v0064).
+SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.10; die 4-stellige AI-Versionierung
+ist davon getrennt und laeuft linear (zuletzt v0065).
 
 Hinweis zur History: Die Versionstabelle unten ist zwischen v0023 und v0024 unvollstaendig.
 Einige Features (erweiterte Hint-Syntax mit Regex, Template-Compilation-Cache) sind im Code
@@ -38,6 +38,50 @@ Hauptfeatures:
 - --latest Flag fuer @* statt @pin Version-Constraints
 
 ## Aktuelle Arbeit
+
+v0065: Wrapper im Scratch-Projekt, Legacy-Toolchain-Rezept, Nacharbeiten aus den Real-Tests
+
+Basis: Dein 1.12.10 (A1-Beweis auf bootes: Daemon 25, Toolchain 8, major version 52).
+
+- Wrapper-Generierung neu: 'gradle wrapper' laeuft in einem leeren Scratch-Projekt
+  (--no-daemon --quiet), die vier Wrapper-Dateien werden kopiert, gradlew chmod 755,
+  Scratch wird aufgeraeumt. Vorher lief der Task im generierten Projekt und musste dort
+  erst buildSrc kompilieren (kotlin-dsl, kalter Cache) -> 60-s-Timeout im Multiproject
+  und eine Race Condition (Dateien lagen vor dem Abbruch schon da). Das Leeren/Zurueck-
+  schreiben von build/settings.gradle.kts entfaellt komplett. Timeout 180 s; alle
+  Fehlerpfade nennen das manuelle Kommando inkl. --gradle-distribution-url.
+  Nebenbefund: kotlin-multi bekam bisher NIE einen Wrapper (buildSrc-Problem), die Tests
+  kaschierten das per Skip "uses buildSrc - no wrapper generated"; Skip-Grund korrigiert.
+- Legacy-Toolchain-Rezept: JUnit 6 verlangt Java 17 (Gradle-Modul-Metadaten), fuer
+  Toolchain 8/11 ist junit = "5.13.4" + junit-platform-launcher version = "1.13.4" zu
+  pinnen. Steht jetzt in der jdk-Hint-Fehlermeldung und in den READMEs von java-library
+  und multiproject-root, inkl. fromEnv-Discovery.
+- gradle.properties aller Templates: Toolchain-Discovery-Vertrag
+  (#org.gradle.java.installations.fromEnv=JAVA_HOME_8_X64 als Muster, CI-Konvention
+  JAVA_HOME_<major>_X64; org.gradle.java.installations.auto-download=false).
+- byte-buddy/mockk-JVM-Flags (-XX:+EnableDynamicAgentLoading, -Xshare:off,
+  --sun-misc-unsafe-memory-access=allow) in allen Test-Bloecken (Conventions + Standalone),
+  nach dem GMBooking/CoFix-Muster - aber toolchain-gegated (>=21 bzw. >=23): die Flags
+  existieren auf aelteren JVMs nicht und liessen die Test-JVM mit Toolchain 8 gar nicht
+  starten. Dafuer 'val jdkVersion: Int' einheitlich in allen Standalone-Builds.
+- kotlin-javaFX: verschachtelter Hint-Default ({{ group }}.MainKt im Hint) ersetzt durch
+  mainClass.set("{{ group }}.MainKt") wie in der Subproject-Variante; main_class aus
+  TEMPLATE.md entfernt. Generierte javaFX-Projekte hatten eine unrenderte mainClass.
+- java-library/settings.gradle.kts: enableFeaturePreview(TYPESAFE_PROJECT_ACCESSORS)
+  entfernt (Single-Module, nur "incubating"-Meldung).
+- init/subproject-Log zeigt den gerenderten Pfad (src/main/java/com/example/...) statt
+  des Template-Pfads mit {{ group_path }}.
+- FEHLER aus 1.12.10 behoben (vorbestehend, erst sichtbar mit installiertem gradle):
+  ProjectGenerator/SubprojectGenerator wenden die TEMPLATE.md-Defaults jetzt selbst an.
+  Ein ohne ContextBuilder gebauter Kontext (Tests, Skripte) hatte enable_kover/
+  enable_sbom nicht -> 'enable_sbom is undefined' in test_ktor_generation,
+  test_springboot_generation, test_generation_speed. Dieselbe Ursache hatte
+  test_real_compilation - der galt faelschlich seit Monaten als "umgebungsbedingt".
+- Verifiziert: Scratch-Wrapper real mit lokaler Distribution (file://-URL): 4 Dateien,
+  gradlew 755, Scratch aufgeraeumt; Fehlerpfad (Netz geblockt) laesst Projekt unberuehrt;
+  gerenderte Pfade im Log; alle 7 Templates generieren; version_sync gruen; alles LF.
+- Betroffene Repos: gradleInit (gradleInit.py, test_gradleInit.py),
+  gradleInitTemplates (alle Templates).
 
 v0064: Template-Runde A+B (Brownfield-/Enterprise-Tauglichkeit) + java-library
 
