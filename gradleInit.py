@@ -46,7 +46,7 @@ SCOOP_DIR = os.environ.get('SCOOP')
 SCOOP_SHIMS_DIR = os.path.join(SCOOP_DIR, 'shims') if SCOOP_DIR else None
 
 # Default Gradle version
-DEFAULT_GRADLE_VERSION = "9.8.0"
+DEFAULT_GRADLE_VERSION = "9.9.1"
 GRADLE_VERSIONS_URL = "https://services.gradle.org/versions/all"
 
 # Default project values for a fresh config; also used as fallbacks when an older
@@ -56,7 +56,7 @@ DEFAULT_PROJECT_DEFAULTS = {
     'group': 'com.example',
     'version': '0.1.0',
     'gradle_version': DEFAULT_GRADLE_VERSION,
-    'kotlin_version': '2.4.20',
+    'kotlin_version': '2.4.21',
     'jdk_version': '25',
 }
 
@@ -3008,7 +3008,8 @@ class DynamicCLIBuilder:
         # Base arguments
         base_group = init_parser.add_argument_group('Base arguments')
         base_group.add_argument('--template',
-                                help='Template name')
+                                help='Template name, local template directory (contains TEMPLATE.md) '
+                                     'or Git URL')
         base_group.add_argument('--group',
                                 help='Project group ID')
         base_group.add_argument('--project-version', dest='project_version',
@@ -3155,7 +3156,8 @@ class DynamicCLIBuilder:
         subproject_parser.add_argument('name',
                                         help='Subproject name/directory')
         subproject_parser.add_argument('--template', '-t', required=True,
-                                        help='Template to use for subproject')
+                                        help='Template for the subproject: name, local template '
+                                             'directory (contains TEMPLATE.md) or Git URL')
         subproject_parser.add_argument('--group', '-g',
                                         help='Override group ID')
         subproject_parser.add_argument('--config', action='append',
@@ -3817,7 +3819,6 @@ class ProjectGenerator:
     def _run_post_generation_tasks(self):
         """Run post-generation tasks (gradle wrapper, git init, etc.)"""
         print_info("Running post-generation tasks...")
-        print_info("*** gradleInit.py v010 - VERBOSE MODE ***")
 
         # Generate Gradle Wrapper if build.gradle.kts, build.gradle, or settings.gradle.kts exists
         gradle_build = self.target_path / 'build.gradle.kts'
@@ -3831,7 +3832,10 @@ class ProjectGenerator:
         if gradle_build.exists() or settings_gradle.exists():
             self._generate_gradle_wrapper()
 
-        # Initialize git repository
+        self._initialize_git_repository()
+
+    def _initialize_git_repository(self):
+        """git init, add, mark gradlew executable in the index, initial commit."""
         if GIT_AVAILABLE:
             try:
                 # Git init
@@ -3856,6 +3860,28 @@ class ProjectGenerator:
                     text=True,
                     check=True
                 )
+
+                # The executable bit lives in the Git index, not only in the
+                # filesystem: on Windows (core.fileMode=false) os.chmod has no
+                # effect and gradlew / *.sh would be committed as 100644, so a
+                # Linux/macOS checkout could not run them.
+                listed = subprocess.run(
+                    ['git', 'ls-files', '-z', '--', 'gradlew', '*.sh'],
+                    cwd=self.target_path,
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                scripts = [name for name in listed.stdout.split('\0') if name]
+                if scripts:
+                    print_info("Executing: git update-index --chmod=+x " + ' '.join(scripts))
+                    subprocess.run(
+                        ['git', 'update-index', '--chmod=+x', '--', *scripts],
+                        cwd=self.target_path,
+                        capture_output=True,
+                        text=True,
+                        check=True
+                    )
 
                 # Git commit
                 print_info("Executing: git commit -m 'Initial commit from gradleInit'")
@@ -4649,12 +4675,14 @@ def validate_value_against_hint(value: str, hint: 'TemplateVariable') -> Tuple[b
                 # The hint enforces the modern-JDK policy for new projects. A
                 # legacy toolchain (migrations) is a deliberate catalog edit.
                 error_msg += ("\n  Legacy toolchain (e.g. 8/11): generate with the default, then in "
-                              "gradle/libs.versions.toml set 'jdk', and pin the test stack to the "
-                              "last Java-8 line: junit = \"5.13.4\" with junit-platform-launcher "
-                              "version = \"1.13.4\" (JUnit 6 requires Java 17). The build/daemon JDK "
-                              "is independent (gradle/gradle-daemon-jvm.properties); make the "
-                              "toolchain JDK discoverable via "
-                              "org.gradle.java.installations.fromEnv=JAVA_HOME_8_X64.")
+                              "gradle/libs.versions.toml set 'jdk' and pin the test stack to the "
+                              "last Java-8 line (JUnit 6 requires Java 17): junit = \"5.13.4\", and "
+                              "in [libraries] give junit-platform-launcher its own "
+                              "version = \"1.13.4\" instead of version.ref = \"junit\" (the JUnit 5 "
+                              "platform is versioned 1.x). The build/daemon JDK is independent "
+                              "(gradle/gradle-daemon-jvm.properties); make the toolchain JDK "
+                              "discoverable via org.gradle.java.installations.fromEnv=JAVA_HOME_8_X64 "
+                              "in gradle.properties.")
             return False, error_msg
     except re.error as e:
         # Invalid regex pattern in template
@@ -4742,6 +4770,33 @@ def validate_cli_args_against_template(args: Dict[str, Any],
     return len(errors) == 0, errors
 
 
+def detect_root_group(root_path: Path) -> Optional[str]:
+    """
+    Read the Maven group of a multiproject from its build logic.
+
+    The multiproject templates set ``group = "..."`` in the buildSrc convention
+    plugins (java-common-conventions first, kotlin-common-conventions in older
+    roots); a plain root build file is checked last. Returns None when no
+    literal group assignment is found.
+    """
+    candidates = [
+        root_path / 'buildSrc' / 'src' / 'main' / 'kotlin' / 'java-common-conventions.gradle.kts',
+        root_path / 'buildSrc' / 'src' / 'main' / 'kotlin' / 'kotlin-common-conventions.gradle.kts',
+        root_path / 'build.gradle.kts',
+    ]
+    pattern = re.compile(r'^\s*group\s*=\s*"([A-Za-z_][\w.]*)"', re.MULTILINE)
+    for candidate in candidates:
+        if not candidate.is_file():
+            continue
+        try:
+            match = pattern.search(candidate.read_text(encoding='utf-8'))
+        except OSError:
+            continue
+        if match:
+            return match.group(1)
+    return None
+
+
 def find_gradle_root(start_path: Path = None) -> Optional[Path]:
     """
     Find the root of a Gradle project by looking for settings.gradle.kts.
@@ -4822,7 +4877,9 @@ def handle_init_command(args: argparse.Namespace,
             print()
             print("Required:")
             print("  PROJECT_NAME              Name of the project to create")
-            print("  --template TEMPLATE       Template to use (kotlin-single, kotlin-multi, etc.)")
+            print("  --template TEMPLATE       Template name (kotlin-single, java-single, etc.),")
+            print("                            a local template directory (contains TEMPLATE.md)")
+            print("                            or a Git URL")
             print()
             print("Options:")
             print("  --group GROUP             Group ID (default: com.example)")
@@ -4842,6 +4899,7 @@ def handle_init_command(args: argparse.Namespace,
             print("  gradleInit init myApp --template kotlin-single")
             print("  gradleInit init myApp --template kotlin-single --group com.example")
             print("  gradleInit init myApp --template springboot --gradle-version 9.3.1")
+            print("  gradleInit init myApp --template /c/devl/gradleInitTemplates/java-single")
             print("  gradleInit init myApp --interactive")
             print()
             print("List available templates:")
@@ -5357,9 +5415,17 @@ def handle_subproject_command(args: argparse.Namespace,
     if 'custom' in config:
         context.update(config['custom'])
 
-    # Override with CLI args
+    # Group: CLI > group of the root project (buildSrc conventions) > config
+    # defaults > template default. Without this, a subproject in a root created
+    # with --group com.company would get the template default com.example as
+    # its Java package.
     if args.group:
         context['group'] = args.group
+    else:
+        root_group = detect_root_group(root_path)
+        if root_group:
+            context['group'] = root_group
+            print_info(f"Group from root project: {root_group}")
 
     # Process --config arguments
     if args.config:

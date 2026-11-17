@@ -101,6 +101,19 @@ class TestBlockCheck(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("SSoT says 5.13.4", errors[0])
 
+    def test_block_accepts_bare_major_and_four_component_versions(self):
+        # JavaFX publishes both "27" and "27.0.1.1"; neither may read as "no version".
+        for value in ("27", "27.0.1.1"):
+            text = (
+                "<!-- versions:begin -->\n"
+                f"JavaFX:      {value}\n"
+                "<!-- versions:end -->"
+            )
+            errors = version_sync.check_readme_block(text, {"javafx": value}, "f")
+            self.assertEqual(errors, [], value)
+            new_text, changes = version_sync.apply_readme_block(text, {"javafx": "28.0.2.1"})
+            self.assertIn("JavaFX:      28.0.2.1", new_text, value)
+
 
 class TestToolDefaults(unittest.TestCase):
     def test_gradle_default_mismatch_is_error(self):

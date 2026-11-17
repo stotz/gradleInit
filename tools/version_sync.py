@@ -64,6 +64,8 @@ TEMPLATES = [
     "ktor",
     "springboot",
     "kotlin-javaFX",
+    "java-library",
+    "java-single",
     "multiproject-root",
 ]
 
@@ -84,9 +86,10 @@ BLOCK_LABELS = {
 SPAN_RE = re.compile(r"<!--v:([A-Za-z0-9_\-]+)-->(.*?)<!--/v-->", re.S)
 VREGION_RE = re.compile(r"<!--\s*vregion:begin\s*-->(.*?)<!--\s*vregion:end\s*-->", re.S)
 BLOCK_RE = re.compile(r"<!--\s*versions:begin\s*-->(.*?)<!--\s*versions:end\s*-->", re.S)
-# Version token: X.Y[.Z] or a bare major (JavaFX publishes "27"). Bounded so a
-# bare major is not matched inside a longer token.
-VERSION_TOKEN_RE = re.compile(r"(?<![\w.])\d+(?:\.\d+){0,2}(?![\w.])")
+# Version token: a bare major (JavaFX publishes "27"), X.Y, X.Y.Z or X.Y.Z.W
+# (JavaFX also publishes "27.0.1.1"). Bounded so a shorter token is never
+# matched inside a longer one.
+VERSION_TOKEN_RE = re.compile(r"(?<![\w.])\d+(?:\.\d+){0,3}(?![\w.])")
 WRAPPER_VERSION_RE = re.compile(r"gradle-(\d+\.\d+(?:\.\d+)?)-")
 
 

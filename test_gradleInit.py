@@ -844,7 +844,7 @@ class TestStaleConfigGeneration(unittest.TestCase):
     so it never exercised this bug.
     """
 
-    TEMPLATES = ['kotlin-single', 'kotlin-multi', 'ktor', 'springboot', 'kotlin-javaFX', 'java-library']
+    TEMPLATES = ['kotlin-single', 'kotlin-multi', 'ktor', 'springboot', 'kotlin-javaFX', 'java-library', 'java-single']
     VERSION_KEYS = ('kotlin_version', 'jdk_version', 'gradle_version')
 
     @classmethod
@@ -1419,42 +1419,6 @@ class TestAuditSources(unittest.TestCase):
         self.assertIn('authority unverified', by['cdx']['message'])
 
 class TestSelfUpdateGitInteractive(unittest.TestCase):
-    """The self-update git pull must run with inherited stdio (ssh passphrase
-    prompts need the terminal) and give actionable hints on failure."""
-
-    def test_pull_runs_interactive_and_hints_on_failure(self):
-        import io, contextlib
-        calls = []
-        class _R:
-            def __init__(self, rc, out=''):
-                self.returncode = rc
-                self.stdout = out
-                self.stderr = ''
-        real_run = gradleInit.subprocess.run
-        def fake_run(cmd, **kw):
-            calls.append((list(cmd), kw))
-            if 'rev-parse' in cmd:
-                return _R(0, '/tmp/repo\n')
-            return _R(1)  # pull fails
-        gradleInit.subprocess.run = fake_run
-        try:
-            buf = io.StringIO()
-            with contextlib.redirect_stdout(buf):
-                rc = gradleInit.self_update_git(Path('/tmp/repo/gradleInit.py'))
-        finally:
-            gradleInit.subprocess.run = real_run
-        self.assertEqual(rc, 1)
-        pull_calls = [kw for cmd, kw in calls if 'pull' in cmd]
-        self.assertEqual(len(pull_calls), 1)
-        # inherited stdio: no output capturing on the pull invocation
-        self.assertNotIn('capture_output', pull_calls[0])
-        self.assertNotIn('stdout', pull_calls[0])
-        out = buf.getvalue()
-        self.assertIn('ssh-add', out)
-        self.assertIn('Permission denied (publickey)', out)
-
-
-class TestSelfUpdateGitInteractive(unittest.TestCase):
     """self_update_git must run 'git pull' with inherited stdio so ssh can
     prompt for a key passphrase; capture_output turned a passphrase-protected
     key into 'Permission denied (publickey)'."""
@@ -1492,6 +1456,212 @@ class TestSelfUpdateGitInteractive(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn('ssh-add', out)
         self.assertIn('Permission denied (publickey)', out)
+
+
+
+class TestTemplateRepositoryPolicy(unittest.TestCase):
+    """Dependency repositories are declared once, in settings.gradle.kts, with
+    FAIL_ON_PROJECT_REPOS. A repositories {} block in a build file would take
+    precedence silently (PREFER_PROJECT is Gradle's default) and bypass an
+    internal mirror configured via repository_url."""
+
+    STANDALONE = ['java-library', 'java-single', 'kotlin-single', 'kotlin-javaFX', 'ktor', 'springboot']
+    ROOTS = ['multiproject-root', 'kotlin-multi']
+
+    @classmethod
+    def setUpClass(cls):
+        sibling = Path(gradleinit_path).resolve().parent.parent / 'gradleInitTemplates'
+        if not (sibling / 'java-single' / 'TEMPLATE.md').exists():
+            raise unittest.SkipTest('local gradleInitTemplates checkout not found')
+        cls.templates = sibling
+
+    def test_standalone_templates_declare_repositories_in_settings_only(self):
+        import re
+        for name in self.STANDALONE:
+            with self.subTest(template=name):
+                build = (self.templates / name / 'build.gradle.kts').read_text(encoding='utf-8')
+                settings = (self.templates / name / 'settings.gradle.kts').read_text(encoding='utf-8')
+                self.assertIsNone(re.search(r'^repositories\s*\{', build, re.M),
+                                  f'{name}: repositories block in build.gradle.kts')
+                self.assertIn('RepositoriesMode.FAIL_ON_PROJECT_REPOS', settings)
+                self.assertIn('dependencyResolutionManagement', settings)
+
+    def test_root_templates_ship_a_root_build_file(self):
+        for name in self.ROOTS:
+            with self.subTest(template=name):
+                self.assertTrue((self.templates / name / 'build.gradle.kts').is_file())
+                props = (self.templates / name / 'gradle.properties').read_text(encoding='utf-8')
+                self.assertNotIn('jdkVersion', props, f'{name}: dead jdkVersion property')
+
+    def test_fromenv_example_follows_project_jdk(self):
+        for name in self.STANDALONE + self.ROOTS:
+            with self.subTest(template=name):
+                props = (self.templates / name / 'gradle.properties').read_text(encoding='utf-8')
+                self.assertIn('fromEnv=JAVA_HOME_{{ jdk_version }}_X64', props)
+                self.assertNotIn('JAVA_HOME_8_X64', props)
+
+    def test_every_template_ships_the_roundtrip_scripts(self):
+        for name in self.STANDALONE + self.ROOTS:
+            with self.subTest(template=name):
+                self.assertTrue((self.templates / name / 'dump_src.sh.raw').is_file())
+                self.assertTrue((self.templates / name / 'extract.sh.raw').is_file())
+                text = (self.templates / name / 'extract.sh.raw').read_text(encoding='utf-8')
+                self.assertIn('DEVL_ROOT', text)
+                self.assertIn('EXTRACT_DOWNLOAD_DIR', text)
+
+    def test_no_template_links_to_the_wrong_github_org(self):
+        for readme in self.templates.glob('*/README.md'):
+            with self.subTest(readme=readme.parent.name):
+                self.assertNotIn('github.com/anthropics/gradleInit',
+                                 readme.read_text(encoding='utf-8'))
+
+
+class TestJavaSingleTemplate(unittest.TestCase):
+    """java-single: pure Java application with a main class, installDist as the
+    default delivery and Shadow as opt-in; usable standalone and as subproject."""
+
+    @classmethod
+    def setUpClass(cls):
+        sibling = Path(gradleinit_path).resolve().parent.parent / 'gradleInitTemplates'
+        if not (sibling / 'java-single' / 'TEMPLATE.md').exists():
+            raise unittest.SkipTest('local gradleInitTemplates checkout not found')
+        cls.templates = sibling
+        cls.workdir = Path(tempfile.mkdtemp(prefix='gradleInit_javasingle_'))
+        cls.env = os.environ.copy()
+        home = cls.workdir / 'home'
+        home.mkdir()
+        cls.env['HOME'] = str(home)
+        cls.env['USERPROFILE'] = str(home)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.workdir, ignore_errors=True)
+
+    def _init(self, name, *extra):
+        cmd = [sys.executable, gradleinit_path, 'init', name,
+               '--template', str(self.templates / 'java-single'),
+               '--group', 'ch.example.app', '--no-interactive', *extra]
+        result = subprocess.run(cmd, cwd=self.workdir, env=self.env,
+                                capture_output=True, text=True, timeout=300)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return self.workdir / name
+
+    def test_default_is_application_with_installdist_and_no_shadow(self):
+        project = self._init('app_default')
+        build = (project / 'build.gradle.kts').read_text(encoding='utf-8')
+        self.assertIn('    application\n', build)
+        self.assertIn('mainClass.set("ch.example.app.Main")', build)
+        self.assertIn('"Main-Class" to application.mainClass.get()', build)
+        self.assertIn('Component.Type.APPLICATION', build)
+        self.assertNotIn('shadow', build)
+        catalog = (project / 'gradle' / 'libs.versions.toml').read_text(encoding='utf-8')
+        self.assertNotIn('shadow', catalog)
+        main = project / 'src' / 'main' / 'java' / 'ch' / 'example' / 'app' / 'Main.java'
+        self.assertTrue(main.is_file())
+        self.assertIn('public static void main(String[] args)', main.read_text(encoding='utf-8'))
+        self.assertTrue((project / 'src' / 'test' / 'java' / 'ch' / 'example' / 'app' / 'MainTest.java').is_file())
+        self.assertIn('FAIL_ON_PROJECT_REPOS', (project / 'settings.gradle.kts').read_text(encoding='utf-8'))
+        self.assertIn('*.tar.bz2', (project / '.gitignore').read_text(encoding='utf-8'))
+        # round-trip scripts: copied from .raw, executable in the git index
+        self.assertTrue((project / 'extract.sh').is_file())
+        if gradleInit.GIT_AVAILABLE and (project / '.git').is_dir():
+            modes = subprocess.run(['git', 'ls-files', '-s', 'extract.sh', 'dump_src.sh'],
+                                   cwd=project, capture_output=True, text=True).stdout
+            self.assertEqual(modes.count('100755 '), 2, modes)
+
+    def test_shadow_opt_in_adds_plugin_catalog_and_task(self):
+        project = self._init('app_shadow', '--config', 'enable_shadow=true')
+        build = (project / 'build.gradle.kts').read_text(encoding='utf-8')
+        self.assertIn('alias(libs.plugins.shadow)', build)
+        self.assertIn('tasks.shadowJar', build)
+        self.assertIn('mergeServiceFiles()', build)
+        catalog = (project / 'gradle' / 'libs.versions.toml').read_text(encoding='utf-8')
+        self.assertIn('shadow = { id = "com.gradleup.shadow"', catalog)
+        self.assertIn('## Fat jar (Shadow)', (project / 'README.md').read_text(encoding='utf-8'))
+
+    def test_subproject_inherits_root_group(self):
+        cmd = [sys.executable, gradleinit_path, 'init', 'mp',
+               '--template', str(self.templates / 'multiproject-root'),
+               '--group', 'ch.example.mp', '--no-interactive']
+        result = subprocess.run(cmd, cwd=self.workdir, env=self.env,
+                                capture_output=True, text=True, timeout=300)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        root = self.workdir / 'mp'
+        self.assertTrue((root / 'build.gradle.kts').is_file(), 'root build file missing')
+        cmd = [sys.executable, gradleinit_path, 'subproject', 'svc',
+               '--template', str(self.templates / 'java-single')]
+        result = subprocess.run(cmd, cwd=root, env=self.env,
+                                capture_output=True, text=True, timeout=300)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('Group from root project: ch.example.mp', result.stdout)
+        main = root / 'svc' / 'src' / 'main' / 'java' / 'ch' / 'example' / 'mp' / 'Main.java'
+        self.assertTrue(main.is_file(), 'subproject sources must use the root group')
+        build = (root / 'svc' / 'build.gradle.kts').read_text(encoding='utf-8')
+        self.assertIn('id("java-common-conventions")', build)
+        self.assertIn('mainClass.set("ch.example.mp.Main")', build)
+        catalog = (root / 'gradle' / 'libs.versions.toml').read_text(encoding='utf-8')
+        self.assertIn('junit-platform-launcher', catalog)
+
+
+class TestDetectRootGroup(unittest.TestCase):
+    """detect_root_group reads group = "..." from the buildSrc conventions."""
+
+    def test_reads_group_from_java_common_conventions(self):
+        root = Path(tempfile.mkdtemp(prefix='rootgroup_'))
+        try:
+            conv = root / 'buildSrc' / 'src' / 'main' / 'kotlin'
+            conv.mkdir(parents=True)
+            (conv / 'java-common-conventions.gradle.kts').write_text(
+                'plugins { java }\n\ngroup = "ch.acme.tools"\nversion = "1.0"\n', encoding='utf-8')
+            self.assertEqual(gradleInit.detect_root_group(root), 'ch.acme.tools')
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_returns_none_without_literal_group(self):
+        root = Path(tempfile.mkdtemp(prefix='rootgroup_'))
+        try:
+            (root / 'build.gradle.kts').write_text('// nothing here\n', encoding='utf-8')
+            self.assertIsNone(gradleInit.detect_root_group(root))
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+
+class TestGradlewExecutableBitInIndex(unittest.TestCase):
+    """The initial commit must carry gradlew as 100755. os.chmod is ineffective
+    on Windows (core.fileMode=false), so the mode is set in the index with
+    git update-index --chmod=+x."""
+
+    def test_initial_commit_has_gradlew_mode_100755(self):
+        if not gradleInit.GIT_AVAILABLE:
+            self.skipTest('git not available')
+        target = Path(tempfile.mkdtemp(prefix='gradlew_mode_'))
+        try:
+            (target / 'gradlew').write_bytes(b'#!/bin/sh\necho wrapper\n')
+            (target / 'settings.gradle.kts').write_bytes(b'rootProject.name = "x"\n')
+            gen = gradleInit.ProjectGenerator.__new__(gradleInit.ProjectGenerator)
+            gen.target_path = target
+            env_backup = {k: os.environ.get(k) for k in ('GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL',
+                                                          'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL')}
+            os.environ.update({'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@example.org',
+                               'GIT_COMMITTER_NAME': 't', 'GIT_COMMITTER_EMAIL': 't@example.org'})
+            try:
+                import io, contextlib
+                with contextlib.redirect_stdout(io.StringIO()):
+                    gen._initialize_git_repository()
+            finally:
+                for k, v in env_backup.items():
+                    if v is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = v
+            result = subprocess.run(['git', 'ls-files', '-s', 'gradlew'], cwd=target,
+                                    capture_output=True, text=True)
+            self.assertTrue(result.stdout.startswith('100755 '), result.stdout)
+            log = subprocess.run(['git', 'log', '--oneline'], cwd=target,
+                                 capture_output=True, text=True)
+            self.assertIn('Initial commit from gradleInit', log.stdout)
+        finally:
+            shutil.rmtree(target, ignore_errors=True)
 
 
 # ============================================================================

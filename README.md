@@ -45,11 +45,13 @@ A comprehensive single-file Python tool for creating professional Kotlin/Gradle 
 <!-- vregion:begin -->
 | Template | Description | Key Dependencies |
 |----------|-------------|------------------|
-| `kotlin-single` | Single-module CLI application | Clikt <!--v:clikt-->5.1.0<!--/v-->, Shadow <!--v:shadow-->9.6.1<!--/v--> |
+| `kotlin-single` | Single-module CLI application | Clikt <!--v:clikt-->5.2.0<!--/v-->, Shadow <!--v:shadow-->9.6.1<!--/v--> |
 | `kotlin-multi` | Multi-module with buildSrc | Shadow <!--v:shadow-->9.6.1<!--/v--> |
-| `ktor` | Ktor HTTP server | Ktor <!--v:ktor-->3.6.0<!--/v-->, Logback <!--v:logback-->1.6.5<!--/v--> |
-| `springboot` | Spring Boot REST API | Spring Boot <!--v:spring-boot-->4.1.1<!--/v--> |
-| `kotlin-javaFX` | JavaFX desktop application | JavaFX <!--v:javafx-->27<!--/v-->, Ikonli <!--v:ikonli-->12.4.0<!--/v--> |
+| `ktor` | Ktor HTTP server | Ktor <!--v:ktor-->3.6.1<!--/v-->, Logback <!--v:logback-->1.6.7<!--/v--> |
+| `springboot` | Spring Boot REST API | Spring Boot <!--v:spring-boot-->4.1.2<!--/v--> |
+| `kotlin-javaFX` | JavaFX desktop application | JavaFX <!--v:javafx-->27.0.1.1<!--/v-->, Ikonli <!--v:ikonli-->12.4.0<!--/v--> |
+| `java-library` | Pure Java library module | JUnit <!--v:junit-->6.1.3<!--/v-->, AssertJ <!--v:assertj-->3.27.7<!--/v--> |
+| `java-single` | Pure Java application (main class) | JUnit <!--v:junit-->6.1.3<!--/v-->, AssertJ <!--v:assertj-->3.27.7<!--/v--> |
 | `multiproject-root` | Root for multi-module projects | All above available |
 <!-- vregion:end -->
 
@@ -57,16 +59,16 @@ A comprehensive single-file Python tool for creating professional Kotlin/Gradle 
 
 ```
 <!-- versions:begin -->
-Kotlin:      2.4.20 (via kotlin_version variable)
+Kotlin:      2.4.21 (via kotlin_version variable)
 JUnit:       6.1.3
 AssertJ:     3.27.7
-MockK:       1.14.11
+MockK:       1.14.12
 Shadow:      9.6.1
-Ktor:        3.6.0
-Spring Boot: 4.1.1
-JavaFX:      27
-Logback:     1.6.5
-Clikt:       5.1.0<!-- versions:end -->
+Ktor:        3.6.1
+Spring Boot: 4.1.2
+JavaFX:      27.0.1.1
+Logback:     1.6.7
+Clikt:       5.2.0<!-- versions:end -->
 ```
 
 ---
@@ -143,6 +145,7 @@ gradleInit (Main Tool)
     |
     +-- gradleInitTemplates (Project Templates)
     |       - kotlin-single, kotlin-multi, ktor, springboot, kotlin-javaFX
+    |       - java-library, java-single
     |       - multiproject-root for multi-module projects
     |       - Signed with CHECKSUMS.sha256 + CHECKSUMS.sig
     |

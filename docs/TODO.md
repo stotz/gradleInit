@@ -12,12 +12,12 @@
 
 
 
-## Aktueller Stand (v0065)
+## Aktueller Stand (v0073)
 
 gradleInit ist ein Python-basiertes Tool zur Generierung von Kotlin/Gradle-Projekten aus Templates.
 Verwendet Jinja2 fuer Template-Verarbeitung mit inline Hint-System.
-SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.10; die 4-stellige AI-Versionierung
-ist davon getrennt und laeuft linear (zuletzt v0065).
+SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.11; die 4-stellige AI-Versionierung
+ist davon getrennt und laeuft linear (zuletzt v0073).
 
 Hinweis zur History: Die Versionstabelle unten ist zwischen v0023 und v0024 unvollstaendig.
 Einige Features (erweiterte Hint-Syntax mit Regex, Template-Compilation-Cache) sind im Code
@@ -38,6 +38,164 @@ Hauptfeatures:
 - --latest Flag fuer @* statt @pin Version-Constraints
 
 ## Aktuelle Arbeit
+
+v0073: extract.sh - unbeteiligte untracked Dateien blockieren nicht mehr
+
+- Der Clean-Check unterscheidet jetzt: geaenderte oder gestagete getrackte Dateien und
+  untracked Dateien, die das Archiv ueberschreiben wuerde, blockieren; untracked Dateien,
+  die nicht im Archiv sind (z.B. die frisch erzeugte .extract.cfg vor dem .gitignore-
+  Eintrag, Notizen), kann die Extraktion nicht beschaedigen - sie werden nur als INFO
+  gelistet. Vorher entstand ein Henne-Ei-Problem: --create-cfg legte .extract.cfg an, die
+  blockierte als untracked den Lauf, der die .gitignore mit dem Eintrag gebracht haette.
+- Betroffene Repos: gradleInitTemplates (extract.sh.raw).
+
+v0072: extract.sh - optionale .extract.cfg und --create-cfg
+
+- .extract.cfg neben dem Script (Bash-Syntax, CRLF-tolerant): pkgs=(...), download_dir,
+  target_dir. Fehlt die Datei, gelten die bisherigen Defaults (project/workspace mode).
+  Rangfolge, hoechste zuerst: Kommandozeile, EXTRACT_*-Variablen, .extract.cfg,
+  DOWNLOADS/DEVL_ROOT, eingebaute Defaults. Damit kann /c/devl/gradleInit/extract.sh
+  ohne Argumente alle drei Repos nehmen: pkgs=(gradleInit gradleInitTemplates
+  gradleInitModules).
+- ./extract.sh --create-cfg schreibt eine kommentierte .extract.cfg mit den gerade
+  wirksamen Werten (Modus, Pakete, Pfade) und gibt "please edit: <pfad>" aus; eine
+  vorhandene Datei wird nicht ueberschrieben.
+- .extract.cfg ist in allen Template-.gitignore und in gradleInit/.gitignore (enthaelt
+  Maschinenpfade); sonst blockiert sie als untracked Datei den Dirty-Check.
+- Betroffene Repos: gradleInit (.gitignore), gradleInitTemplates (extract.sh.raw,
+  .gitignore aller Templates).
+
+v0071: version_sync - vierteilige Versionen (JavaFX 27.0.1.1)
+
+- VERSION_TOKEN_RE in tools/version_sync.py akzeptiert jetzt bis zu vier Komponenten
+  (X.Y.Z.W). JavaFX veroeffentlicht 27.0.1.1; der README-Block "JavaFX: 27.0.1.1" hatte
+  nach --apply fuer den Checker "no version", update_all_versions.sh brach mit ERROR ab.
+  Regressionstest fuer "27" und "27.0.1.1" (check und apply).
+- gradleInitTemplates_v0071 ist inhaltlich identisch mit v0070 (gleiche Nummer fuer die
+  Runde, damit extract.sh beide Repos in einem Lauf nimmt).
+- Betroffene Repos: gradleInit (tools/version_sync.py, test_version_sync.py).
+
+v0070: extract.sh - AI-Docs nur Pflicht, wenn das Projekt sie auch verschickt
+
+- Die Pflichtpruefung auf docs/AI_Instruktion.md und docs/AI_TODO.md haengt jetzt daran,
+  ob das Projekt die Dateien ueberhaupt in sein Archiv packt: getrackt oder Eintrag in
+  dump_src.cfg (file_list). Eine nur lokal vorhandene Kopie (gradleInitTemplates hat eine
+  AI_Instruktion.md, die weder getrackt noch Extra ist) erreicht die AI nie, also kann
+  die Lieferung sie nicht enthalten - vorher brach extract.sh genau daran ab. Solche
+  Dateien werden als INFO gemeldet.
+- Betroffene Repos: gradleInitTemplates (extract.sh.raw).
+
+v0069: extract.sh - Anleitung bei unsauberem Working Tree, Modus-Erkennung auf Windows
+
+- Bei "working tree not clean" listet extract.sh jetzt die Aenderungen, teilt sie in "wird
+  vom Archiv ueberschrieben" und "ist nicht im Archiv, bleibt erhalten" und nennt die vier
+  Wege mit fertigen Kommandos: committen (empfohlen bei eigener Arbeit wie SSoT-Update oder
+  Signierung; danach zeigt git diff, was das Archiv geaendert hat), stash, verwerfen (nur
+  wenn es eine aeltere Lieferung ist), --force.
+- Modus-Erkennung ueber 'git rev-parse --show-prefix' (leer am Repo-Root) statt
+  Pfadvergleich mit --show-toplevel: Git for Windows gibt C:/devl/x aus, die Shell
+  /c/devl/x - der Vergleich schlug fehl, und das Script lief im Projekt-Root im
+  workspace mode (funktionierte dank DEVL_ROOT, war aber falsch).
+- Betroffene Repos: gradleInitTemplates (extract.sh.raw in allen
+  Templates).
+
+v0068: extract.sh in allen Templates, DEVL_ROOT, Index-Modus fuer alle *.sh
+
+- extract.sh (Archiv-Roundtrip, Gegenstueck zu dump_src.sh) liegt jetzt als extract.sh.raw
+  in allen acht Templates und wird wie dump_src.sh unveraendert kopiert (Subproject-Modus
+  ueberspringt es). Eine Datei fuer alle Projekte, nichts wird gerendert: der Paketname
+  kommt zur Laufzeit aus dem Verzeichnis des Scripts (archive_basename aus dump_src.cfg,
+  sonst Verzeichnisname) - dieselbe Regel wie in dump_src.sh. Liegt das Script in einem
+  Git-Root, ist das "project mode" (Ziel = Elternverzeichnis); liegt es in einem
+  Arbeitsverzeichnis wie /c/devl, ist das "workspace mode" (Pakete aus Argumenten,
+  EXTRACT_PKGS oder automatisch aus den Archiven im Download-Ordner, deren Projekt-
+  verzeichnis existiert). Ein Exemplar in /c/devl bedient damit gradleInit,
+  gradleInitTemplates und gradleInitModules ohne Konfiguration.
+- Verzeichnisse: DOWNLOAD_DIR = EXTRACT_DOWNLOAD_DIR > DOWNLOADS > /c/data/Downloads;
+  TARGET_DIR = EXTRACT_TARGET_DIR > (project mode: Eltern des Projekts) > DEVL_ROOT >
+  Script-Verzeichnis. Windows-Pfade (C:\devl) werden per cygpath umgesetzt. Im project
+  mode gilt DEVL_ROOT absichtlich nicht: das Archiv muss dort landen, wo das Projekt liegt.
+- Pruefungen: Layout <pkg>/ (lehnt "./"-Archive ab), sha256 pro Paket (<pkg>=<sha>),
+  AI-Docs nur Pflicht, wenn der Working Tree sie fuehrt, Artefakte inkl. __pycache__,
+  .pytest_cache, node_modules, *.tar.bz2, Vollstaendigkeit gegen git ls-files,
+  git-ignorierte Dateien im Archiv als INFO (nicht als git add), Working Tree sauber.
+  Neu --dry-run (nur pruefen). Nach dem Entpacken git add/rm-Zeilen (gequotet, Pfade mit
+  {{ group_path }}) und git status --short.
+- gradleInit.py: der Index-Modus-Fix aus v0066 gilt jetzt fuer gradlew UND alle
+  getrackten *.sh (dump_src.sh, extract.sh): git update-index --chmod=+x nach git add.
+- Tests: Roundtrip-Scripts in allen Templates; generiertes java-single hat extract.sh und
+  dump_src.sh mit 100755 im Index.
+- Betroffene Repos: gradleInit (gradleInit.py, test_gradleInit.py),
+  gradleInitTemplates (alle Templates: extract.sh.raw, TEMPLATE.md skip/raw_copy).
+
+v0067: Archiv-Layout mit Projektverzeichnis als Prefix
+
+Inhalt identisch mit v0066; nur die Lieferform ist korrigiert. Die Archive werden aus dem
+Elternverzeichnis erzeugt (tar cjpf gradleInit_vNNNN.tar.bz2 gradleInit), alle Eintraege
+beginnen mit gradleInit/ bzw. gradleInitTemplates/. v0066 war aus dem Projekt-Root mit
+"." gepackt (Eintraege ./...), was das neue extract.sh (Pruefung "alle Eintraege unter
+<pkg>/") zu Recht ablehnt. Mitgeliefert, ausserhalb der Repos: extract.sh fuer die drei
+gradleInit-Repos (DOWNLOAD_DIR aus EXTRACT_DOWNLOAD_DIR, sonst DOWNLOADS, sonst
+/c/data/Downloads; Artefakt-Pruefung um __pycache__, .pytest_cache und *.tar.bz2 erweitert;
+sha256 pro Paket als <pkg>=<sha256>).
+
+v0066: java-single, Repositories nur in settings, Nacharbeiten aus panoramix/blobplayground
+
+Basis: Dein 1.12.11 (git pull, status clean). Ausloeser: Panoramix-Skelett (v0001/v0002
+des panoramix-Repos) und blobplayground (init --latest + versions --update).
+
+- Neues Template java-single (standalone + subproject): reines Java mit application-Plugin,
+  Main.java mit public static void main, MainTest (JUnit 6 + AssertJ), Main-Class im
+  Manifest, Lieferform installDist/distZip. Kover/SBOM gated wie java-library, SBOM-Typ
+  APPLICATION. Shadow nur als Opt-in enable_shadow (Default false): Fat-Jar verschmilzt
+  Ressourcen (META-INF/services, LICENSE, module-info), bricht signierte Jars und
+  entkoppelt das SBOM vom Artefakt; installDist liefert dasselbe Nutzerversprechen ohne
+  Merge. Gated Block mit mergeServiceFiles(). Fuer Panoramix haette panoramix-app damit
+  direkt als Applikation entstehen koennen statt als umgebautes java-library.
+- Subproject uebernimmt die Group des Root-Projekts: neu detect_root_group() liest
+  group = "..." aus buildSrc/java-common-conventions (dann kotlin-common-conventions, dann
+  Root-Buildfile). Vorher bekam ein Subproject ohne --group das Template-Default
+  com.example als Java-Package, obwohl die Root mit --group ch.entris angelegt war.
+  Reihenfolge: --group > Root-Group > config-Defaults > Template-Default.
+- Repositories nur noch in settings.gradle.kts: der redundante repositories{}-Block in
+  den Standalone-Builds (java-library, java-single, kotlin-single, kotlin-javaFX, ktor,
+  springboot) ist weg, dependencyResolutionManagement setzt FAIL_ON_PROJECT_REPOS wie
+  multiproject-root/kotlin-multi. Ohne den Mode gewinnt ein Projekt-Block stillschweigend
+  (PREFER_PROJECT ist Gradle-Default).
+- gradlew-Modus im Git-Index: nach 'git add .' laeuft 'git update-index --chmod=+x
+  gradlew'. os.chmod ist auf Windows (core.fileMode=false) wirkungslos, der Initial-Commit
+  trug 100644 und ein Linux-Checkout konnte ./gradlew nicht ausfuehren. Git-Block in
+  _initialize_git_repository() ausgelagert (testbar ohne Wrapper).
+- multiproject-root und kotlin-multi liefern ein Root-build.gradle.kts (minimal,
+  kommentiert). Vorher entstand es nur als Nebeneffekt der alten Wrapper-Methode; seit
+  dem Scratch-Wrapper (v0065) fehlte es.
+- multiproject-root/gradle.properties: tote Property jdkVersion entfernt (nichts liest
+  sie, Quelle ist der Katalog; Hint ist weiterhin im Katalog definiert).
+- gradle.properties aller Templates: fromEnv-Muster rendert JAVA_HOME_{{ jdk_version }}_X64
+  statt fest JAVA_HOME_8_X64 (passt zum generierten Katalog; Legacy-Rezept in den READMEs
+  nennt weiterhin JAVA_HOME_8_X64).
+- README-Link aller Templates: github.com/anthropics/gradleInit -> github.com/stotz/gradleInit.
+- Kommentare 'installations.paths' -> 'installations.fromEnv' (java-library, beide
+  java-common-conventions).
+- .gitignore aller Templates: *.tar.bz2 (Archiv-Roundtrip, dump_src.sh schreibt in den
+  Projekt-Root; im panoramix-Upload lag eine 0-Byte-Kopie des Archivs).
+- version_sync TEMPLATES: java-library fehlte seit v0064 (Katalog driftete auf junit
+  6.1.2), jetzt java-library + java-single; --apply ausgefuehrt, --check gruen.
+- gradleInit.py: jdk-Hint-Fehlermeldung nennt den Launcher-Pin praezise (version =
+  "1.13.4" statt version.ref = "junit" - genau der Fehler im panoramix-Katalog);
+  --template-Hilfe dokumentiert lokale Template-Verzeichnisse (find_template konnte das
+  schon: gradleInit init x --template /c/devl/gradleInitTemplates/java-single, damit lokale
+  Templates ohne Release testbar sind); Debug-Zeile '*** v010 - VERBOSE MODE ***' entfernt.
+- Tests: TestTemplateRepositoryPolicy, TestJavaSingleTemplate (default, enable_shadow,
+  Subproject mit Root-Group), TestDetectRootGroup, TestGradlewExecutableBitInIndex;
+  TEMPLATES-Listen um java-single; doppelte Klasse TestSelfUpdateGitInteractive (die
+  erste wurde von der zweiten verdeckt und lief nie) entfernt.
+- READMEs: Template-Tabellen/Listen um java-library und java-single (gradleInit README mit
+  Versionsmarkern, gradleInitTemplates README mit Abschnitten inkl. multiproject-root).
+- Nicht geaendert: SSoT-Werte (cyclonedx 3.4.1, Gradle 9.8.0 - blobplayground zeigte
+  3.6.1/9.9.1 verfuegbar; update_all_versions.sh ist Dein Schritt).
+- Betroffene Repos: gradleInit (gradleInit.py, tools/version_sync.py, test_gradleInit.py,
+  README), gradleInitTemplates (alle Templates, java-single neu, README).
 
 v0065: Wrapper im Scratch-Projekt, Legacy-Toolchain-Rezept, Nacharbeiten aus den Real-Tests
 
