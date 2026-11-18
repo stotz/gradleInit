@@ -45,10 +45,12 @@ except ImportError:
 def find_templates_repo() -> Optional[Path]:
     """Find gradleInitTemplates repository"""
     # Check common locations
+    # The sibling checkout first: that is the state under development. The
+    # installed official templates are the last release, not the working copy.
     locations = [
-        Path.home() / '.gradleInit' / 'templates' / 'official',
         Path(__file__).parent.parent / 'gradleInitTemplates',
         Path(__file__).parent / 'gradleInitTemplates',
+        Path.home() / '.gradleInit' / 'templates' / 'official',
     ]
     
     for location in locations:
@@ -178,14 +180,24 @@ def check_jinja2_syntax(content: str) -> Tuple[bool, List[str]]:
     return len(issues) == 0, issues
 
 
+JINJA_BLOCK_LINE = re.compile(r'^\s*\{%.*%\}\s*$', re.MULTILINE)
+
+
+def strip_jinja_blocks(content: str) -> str:
+    """Drop Jinja2 block lines ({% if enable_kover %} ... {% endif %}).
+
+    Template catalogs gate optional entries with Jinja2 blocks since v0064; the
+    remaining {{ ... }} expressions sit inside TOML strings and parse as-is.
+    """
+    return JINJA_BLOCK_LINE.sub('', content)
+
+
 def validate_toml_file(file_path: Path) -> Tuple[bool, str]:
-    """Validate TOML file syntax"""
+    """Validate TOML file syntax (Jinja2 block lines removed first)"""
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        
-        # Try to parse with toml library
-        toml.loads(content)
+        toml.loads(strip_jinja_blocks(content))
         return True, ""
     except Exception as e:
         return False, str(e)
@@ -303,21 +315,23 @@ class TestTemplateStructure(TemplateTestBase):
                 if name == 'multiproject-root':
                     continue
                     
-                # For multi-module templates, check if any submodule has the structure
+                # Kotlin templates use src/main/kotlin, the Java templates
+                # (java-library, java-single) src/main/java.
+                languages = ('kotlin', 'java')
                 if name == 'kotlin-multi':
                     # Multi-module templates have src in submodules
                     has_src = any(
-                        (template_dir / subdir / 'src' / 'main' / 'kotlin').exists()
+                        (template_dir / subdir / 'src' / 'main' / lang).exists()
                         for subdir in template_dir.iterdir()
                         if subdir.is_dir() and not subdir.name.startswith('.')
+                        for lang in languages
                     )
                     self.assertTrue(has_src,
-                                  f"{name}: No submodule with src/main/kotlin found")
+                                  f"{name}: No submodule with src/main/kotlin or src/main/java found")
                 else:
-                    # Single module templates have src at root
-                    src_main = template_dir / 'src' / 'main' / 'kotlin'
-                    self.assertTrue(src_main.exists(),
-                                  f"{name}: Missing src/main/kotlin")
+                    has_src = any((template_dir / 'src' / 'main' / lang).exists() for lang in languages)
+                    self.assertTrue(has_src,
+                                  f"{name}: Missing src/main/kotlin or src/main/java")
 
 
 # ============================================================================
@@ -415,7 +429,7 @@ class TestFileContent(TemplateTestBase):
             with self.subTest(template=name):
                 toml_file = template_dir / 'gradle' / 'libs.versions.toml'
                 content = toml_file.read_text(encoding='utf-8')
-                data = toml.loads(content)
+                data = toml.loads(strip_jinja_blocks(content))
                 
                 # Check required sections
                 self.assertIn('versions', data,

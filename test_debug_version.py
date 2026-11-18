@@ -42,7 +42,9 @@ cmd = [
 print(f"\nRunning: {' '.join(cmd)}")
 print(f"Working directory: {test_dir}\n")
 
-env = dict(HOME=str(test_dir))
+# Keep PATH and friends: a bare environment hides git and the JDK from gradleInit.
+import os
+env = {**os.environ, 'HOME': str(test_dir), 'USERPROFILE': str(test_dir)}
 result = subprocess.run(
     cmd,
     cwd=test_dir,

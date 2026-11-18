@@ -12,12 +12,12 @@
 
 
 
-## Aktueller Stand (v0073)
+## Aktueller Stand (v0076)
 
 gradleInit ist ein Python-basiertes Tool zur Generierung von Kotlin/Gradle-Projekten aus Templates.
 Verwendet Jinja2 fuer Template-Verarbeitung mit inline Hint-System.
 SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.11; die 4-stellige AI-Versionierung
-ist davon getrennt und laeuft linear (zuletzt v0073).
+ist davon getrennt und laeuft linear (zuletzt v0076).
 
 Hinweis zur History: Die Versionstabelle unten ist zwischen v0023 und v0024 unvollstaendig.
 Einige Features (erweiterte Hint-Syntax mit Regex, Template-Compilation-Cache) sind im Code
@@ -38,6 +38,77 @@ Hauptfeatures:
 - --latest Flag fuer @* statt @pin Version-Constraints
 
 ## Aktuelle Arbeit
+
+v0076: Gradle-Timeout in den Build-Tests
+
+- test_gradleInit._run_gradle hatte 120 s (einzelne Tests 150/180 s). Der erste Build nach
+  einem Gradle-Update laedt Distribution, Kotlin-Compiler und Abhaengigkeiten in einen
+  kalten Cache und braucht laenger: auf bootes brach test_kotlin_multi_app_depends_on_lib
+  mit subprocess.TimeoutExpired ab (ERROR, kein FAIL). Jetzt GRADLE_TIMEOUT = 900 s fuer
+  alle Build-Tests; ein Ablauf wird zu einem lesbaren self.fail mit Hinweis auf den kalten
+  Cache und den letzten 2000 Zeichen Ausgabe statt eines Tracebacks.
+- Betroffene Repos: gradleInit (test_gradleInit.py). Templates unveraendert
+  (kein Templates-Archiv in dieser Runde).
+
+v0075: ktor-Template-Test fuer Ktor 3, Generierungstests gegen den lokalen Checkout, SSoT-Stand
+
+Ausloeser: zweiter run_all_tests.sh-Lauf auf bootes (v0074). 15 Module, 2 rot:
+
+- ktor: der generierte ApplicationTest meldete 404 statt 200 fuer alle drei Endpunkte.
+  Ursache im Template, nicht im Tool: seit Ktor 3 startet testApplication die in
+  application.yaml gelisteten Module nicht mehr automatisch; die Tests liefen gegen eine
+  Applikation ohne Routing. ApplicationTest.kt installiert das Modul jetzt explizit
+  (application { module() }) - der in den Ktor-3-Docs beschriebene Weg. Erster Fund mit
+  echtem Gradle-Build der ktor-Tests; vorher scheiterten die Build-Tests frueher (JDK 21).
+- test_version_sync: 21 Abweichungen "Template 3.6.1, SSoT 3.4.1". Ursache: v0074 wurde
+  auf meiner Arbeitskopie gebaut, nicht auf Deinem Commit - der enthielt den SSoT-Lauf
+  (update_all_versions.sh). Das Archiv hat versions/, README-Marker und die
+  Tool-Defaults in gradleInit.py auf den alten Stand zurueckgesetzt (sichtbar: Wrapper
+  9.8.0 statt 9.9.1 in den Tests). Verstoss gegen die Regel "immer auf dem aktuellen
+  Archiv aufsetzen". v0075 traegt den SSoT-Stand Deines Laufs (kotlin 2.4.21, cyclonedx
+  3.6.1, clikt 5.2.0, ktor 3.6.1, logback 1.6.7, spring-boot 4.1.2, beryx_jlink 4.2.0,
+  javafx 27.0.1.1, controlsfx 11.2.6, mockk 1.14.12, gradle 9.9.1), --apply durchgefuehrt,
+  --check gruen. Nach dem Extrahieren muss git diff fuer versions/ und gradleInit.py leer
+  sein - sonst stimmt mein rekonstruierter Stand nicht und Du schickst mir die Archive.
+- TestTemplateGeneration klonte die Templates immer von GitHub - also den letzten
+  Release, nicht den Arbeitsstand (im Log: kein java-single, alte kotlin-single-Pruefung
+  auf "layout.projectDirectory.file"). Jetzt Sibling-Checkout zuerst, GitHub nur ohne
+  Checkout (CI). Die veraltete "latest fixes"-Pruefung ist weg.
+- Betroffene Repos: gradleInit (test_gradleInit.py, versions/, README, gradleInit.py
+  Tool-Defaults), gradleInitTemplates (ktor/src/test/kotlin/ApplicationTest.kt,
+  Kataloge/READMEs per --apply).
+
+v0074: Testsuite-Schulden aus dem ersten run_all_tests.sh-Lauf auf bootes
+
+Ergebnis des Laufs: alle Produktpfade gruen (CLI, Config, Generierung aller Templates,
+Wrapper, git init mit update-index, version_sync, Self-Update, Cache); die Fehler lagen
+in den Tests selbst, nicht im Tool. Keine Aenderung an gradleInit.py.
+
+- test_gradleInit.py: TestTemplateGeneration erzeugte Projekte mit jdk 21 / Gradle 9.0 /
+  Kotlin 2.2.0 (hart kodiert). Auf bootes ist nur JDK 8 und 25 installiert, alle sechs
+  *_gradle_build-Tests scheiterten mit "Cannot find a Java installation matching
+  languageVersion=21". Jetzt: Versionen aus DEFAULT_PROJECT_DEFAULTS (SSoT-synchron),
+  Toolchain aus dem installierten JDK (installed_java_major(): JAVA_HOME, dann PATH).
+- test_templates.py: kannte nur src/main/kotlin (java-library/java-single haben
+  src/main/java) und parste die Kataloge als rohes TOML - die {% if enable_... %}-Zeilen
+  (seit v0064) brechen den Parser. Jinja-Blockzeilen werden vor dem Parsen entfernt.
+  Templates-Suche: Sibling-Checkout vor ~/.gradleInit/templates/official (vorher wurde
+  der letzte Release geprueft statt der Arbeitsstand).
+- test_version_policy.py: Render-Kontext ohne enable_kover/enable_sbom/enable_shadow ->
+  'enable_kover is undefined'. Argument-Defaults aus TEMPLATE.md werden angewendet, wie
+  es die Generatoren tun. Gleiche Suchreihenfolge wie test_templates.py.
+- test_debug_version.py: env=dict(HOME=...) ohne PATH -> "Git not found". Umgebung wird
+  uebernommen, nur HOME/USERPROFILE umgebogen.
+- run_all_tests.sh: fuehrt nur noch git-getrackte test_*.py aus (lokale Leichen wie
+  test_versions.py ohne Shebang und test_template_compilation.py mit totem Import werden
+  gelistet, nicht ausgefuehrt), ruft python3 statt ./, zaehlt Fehler und endet mit Exit 1,
+  wenn ein Modul scheitert (vorher immer Exit 0, der tote Demo-Block am Ende ist weg).
+- Nicht geaendert: der Git-Identitaets-WARN in test_config_integration (Test-HOME ohne
+  user.name/user.email; Tests pruefen das nicht). Kandidat: GIT_AUTHOR_*/GIT_COMMITTER_*
+  im Test-Env setzen.
+- Betroffene Repos: gradleInit (test_gradleInit.py, test_templates.py,
+  test_version_policy.py, test_debug_version.py, run_all_tests.sh).
+  gradleInitTemplates_v0074 ist identisch mit v0073.
 
 v0073: extract.sh - unbeteiligte untracked Dateien blockieren nicht mehr
 

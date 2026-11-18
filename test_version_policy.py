@@ -37,9 +37,9 @@ _SPEC.loader.exec_module(gradleInit)
 def find_templates_repo() -> Optional[Path]:
     """Locate the gradleInitTemplates repository."""
     locations = [
-        Path.home() / ".gradleInit" / "templates" / "official",
         Path(__file__).parent.parent / "gradleInitTemplates",
         Path(__file__).parent / "gradleInitTemplates",
+        Path.home() / ".gradleInit" / "templates" / "official",
     ]
     for location in locations:
         if location.exists() and location.is_dir():
@@ -60,8 +60,10 @@ def discover_templates(templates_dir: Path) -> Dict[str, Path]:
 def render_version_catalog(template_dir: Path, latest: bool) -> str:
     """Render gradle/libs.versions.toml through the real rendering pipeline.
 
-    The context only needs the variables the catalog references after hint
-    compilation: jdk_version, kotlin_version and version_policy.
+    The context carries the variables the catalog references after hint
+    compilation (jdk_version, kotlin_version, version_policy) plus the
+    TEMPLATE.md argument defaults (enable_kover, enable_sbom, ...), exactly as
+    the generators apply them.
     """
     toml_file = template_dir / "gradle" / "libs.versions.toml"
     context = {
@@ -70,6 +72,9 @@ def render_version_catalog(template_dir: Path, latest: bool) -> str:
         "version_policy": "@*" if latest else "@pin",
     }
     metadata = gradleInit.TemplateMetadata(template_dir)
+    for arg in metadata.get_arguments():
+        if arg.context_key and arg.context_key not in context:
+            context[arg.context_key] = arg.default if arg.default is not None else ""
     compiled = metadata.compile_template_file(toml_file)
     env = gradleInit.setup_jinja2_environment(template_dir, context)
     return env.from_string(compiled).render(**context)

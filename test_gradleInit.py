@@ -58,6 +58,26 @@ except ImportError as e:
 # Test GitHub URL Parsing
 # ============================================================================
 
+def installed_java_major():
+    """Major version of the java on PATH (JAVA_HOME first), or None."""
+    import re as _re
+    candidates = []
+    java_home = os.environ.get('JAVA_HOME')
+    if java_home:
+        candidates.append(os.path.join(java_home, 'bin', 'java'))
+    candidates.append('java')
+    for java in candidates:
+        try:
+            out = subprocess.run([java, '-version'], capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        match = _re.search(r'version "(\d+)(?:\.(\d+))?', out.stderr + out.stdout)
+        if match:
+            major = int(match.group(1))
+            return int(match.group(2)) if major == 1 and match.group(2) else major
+    return None
+
+
 class TestGitHubURLParsing(unittest.TestCase):
     """Test parse_github_url function"""
 
@@ -113,40 +133,25 @@ class TestTemplateGeneration(unittest.TestCase):
         cls.projects_dir = cls.test_root / "projects"
         cls.projects_dir.mkdir()
 
-        # Always get fresh templates from GitHub
-        print("\nFetching latest templates from GitHub...")
-
-        # Remove templates dir if it exists to ensure fresh clone
-        if cls.templates_dir.exists():
-            shutil.rmtree(cls.templates_dir)
-
-        cls.templates_dir.mkdir()
-
-        # Clone templates from GitHub
-        result = subprocess.run(
-            ['git', 'clone', '--depth', '1',
-             'https://github.com/stotz/gradleInitTemplates.git',
-             str(cls.templates_dir)],
-            capture_output=True,
-            text=True
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(f"Failed to clone templates: {result.stderr}")
-
-        print(f"[OK] Templates cloned to {cls.templates_dir}")
-
-        # Verify we got the fixed templates
-        settings_file = cls.templates_dir / "kotlin-single" / "settings.gradle.kts"
-        if settings_file.exists():
-            content = settings_file.read_text()
-            if "pluginManagement" in content and "layout.projectDirectory.file" in content:
-                print("[OK] Verified: Templates contain latest fixes")
-            else:
-                print("[WARN] Warning: Templates may not have latest fixes!")
-                print(f"  First 200 chars: {content[:200]}")
+        # The sibling checkout is the state under development; the GitHub clone
+        # is the fallback (CI without a checkout). Testing GitHub while a local
+        # checkout exists would test the last release instead of the working copy.
+        sibling = Path(gradleinit_path).resolve().parent.parent / 'gradleInitTemplates'
+        if (sibling / 'kotlin-single' / 'TEMPLATE.md').exists():
+            print(f"\nUsing local templates checkout: {sibling}")
+            shutil.copytree(sibling, cls.templates_dir, ignore=shutil.ignore_patterns('.git'))
         else:
-            print(f"[WARN] Warning: settings.gradle.kts not found at {settings_file}")
+            print("\nFetching templates from GitHub (no local checkout found)...")
+            result = subprocess.run(
+                ['git', 'clone', '--depth', '1',
+                 'https://github.com/stotz/gradleInitTemplates.git',
+                 str(cls.templates_dir)],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"Failed to clone templates: {result.stderr}")
+            print(f"[OK] Templates cloned to {cls.templates_dir}")
 
     @classmethod
     def tearDownClass(cls):
@@ -182,14 +187,17 @@ class TestTemplateGeneration(unittest.TestCase):
         if project_path.exists():
             shutil.rmtree(project_path)
 
-        # Build context
+        # Build context. Versions come from the tool defaults (kept in sync with
+        # the SSoT by version_sync) and the toolchain from the installed JDK:
+        # a hard-coded JDK that is not installed fails every gradle build test.
+        defaults = gradleInit.DEFAULT_PROJECT_DEFAULTS
         context = {
             'project_name': project_name,
             'group': 'com.test',
             'version': '1.0.0',
-            'kotlin_version': '2.2.0',
-            'gradle_version': '9.0',
-            'jdk_version': 21,
+            'kotlin_version': defaults['kotlin_version'],
+            'gradle_version': defaults['gradle_version'],
+            'jdk_version': installed_java_major() or int(defaults['jdk_version']),
             'vendor': 'Test Vendor',
             'date': '2025-11-15',
             # Feature flags
@@ -247,7 +255,12 @@ class TestTemplateGeneration(unittest.TestCase):
 
         return project_path
 
-    def _run_gradle(self, project_path: Path, *tasks: str, timeout: int = 120) -> subprocess.CompletedProcess:
+    # A cold Gradle cache (new distribution, new Kotlin compiler, dependencies)
+    # takes well over two minutes on the first build; 120 s made the first build
+    # test of every new Gradle version fail with TimeoutExpired.
+    GRADLE_TIMEOUT = 900
+
+    def _run_gradle(self, project_path: Path, *tasks: str, timeout: int = GRADLE_TIMEOUT) -> subprocess.CompletedProcess:
         """
         Run Gradle tasks in project.
 
@@ -280,13 +293,19 @@ class TestTemplateGeneration(unittest.TestCase):
 
         print(f"-> Command: {' '.join(cmd)}")
 
-        result = subprocess.run(
-            cmd,
-            cwd=str(project_path),
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=str(project_path),
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+        except subprocess.TimeoutExpired as e:
+            partial = e.stdout.decode(errors='replace') if isinstance(e.stdout, bytes) else (e.stdout or '')
+            self.fail(f"Gradle did not finish within {timeout} s ({' '.join(tasks)}). "
+                      f"A cold cache (new distribution or dependencies) needs one warm-up "
+                      f"run; re-run the suite. Partial output:\n{partial[-2000:]}")
 
         if result.returncode != 0:
             print(f"\n{'[ERROR]' * 70}")
@@ -478,7 +497,7 @@ class TestTemplateGeneration(unittest.TestCase):
         )
 
         # Run gradle build
-        result = self._run_gradle(project_path, 'build', timeout=180)
+        result = self._run_gradle(project_path, 'build')
 
         self.assertEqual(result.returncode, 0, "Spring Boot build should succeed")
 
@@ -528,7 +547,7 @@ class TestTemplateGeneration(unittest.TestCase):
         )
 
         # Run gradle build
-        result = self._run_gradle(project_path, 'build', timeout=150)
+        result = self._run_gradle(project_path, 'build')
 
         self.assertEqual(result.returncode, 0, "Ktor build should succeed")
 
