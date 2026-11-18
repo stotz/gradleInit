@@ -200,12 +200,16 @@ class TestTemplateGeneration(unittest.TestCase):
             'jdk_version': installed_java_major() or int(defaults['jdk_version']),
             'vendor': 'Test Vendor',
             'date': '2025-11-15',
-            # Feature flags
+            # Feature flags. Kover and SBOM are deliberately NOT switched off:
+            # the generators apply the TEMPLATE.md defaults (both true), and the
+            # build tests must exercise the coverage gate exactly as CI and a
+            # plain 'gradleInit init' do. With kover disabled here, a template
+            # whose tests fall below the 50 percent ratchet passed locally and
+            # failed in CI (kotlin-single without clikt, 45 percent).
             'enable_clikt': False,
             'enable_shadow': False,
             'enable_detekt': False,
             'enable_dokka': False,
-            'enable_kover': False,
             # Optional fields with defaults
             'company': 'Test Company',
             'author': 'Test Author',
@@ -814,17 +818,16 @@ class TestPerformance(unittest.TestCase):
                 'project_name': 'test-project',
                 'group': 'com.test',
                 'version': '1.0.0',
-                'kotlin_version': '2.2.0',
-                'gradle_version': '9.0',
-                'jdk_version': 25,
+                'kotlin_version': gradleInit.DEFAULT_PROJECT_DEFAULTS['kotlin_version'],
+                'gradle_version': gradleInit.DEFAULT_PROJECT_DEFAULTS['gradle_version'],
+                'jdk_version': installed_java_major() or int(gradleInit.DEFAULT_PROJECT_DEFAULTS['jdk_version']),
                 'vendor': 'Test Vendor',
                 'date': '2025-11-15',
-                # Feature flags (templates use StrictUndefined, so all must be set)
+                # Feature flags (kover/sbom come from the TEMPLATE.md defaults)
                 'enable_clikt': False,
                 'enable_shadow': False,
                 'enable_detekt': False,
                 'enable_dokka': False,
-                'enable_kover': False,
                 # Optional fields with defaults
                 'company': 'Test Company',
                 'author': 'Test Author',

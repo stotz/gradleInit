@@ -12,12 +12,12 @@
 
 
 
-## Aktueller Stand (v0076)
+## Aktueller Stand (v0077)
 
 gradleInit ist ein Python-basiertes Tool zur Generierung von Kotlin/Gradle-Projekten aus Templates.
 Verwendet Jinja2 fuer Template-Verarbeitung mit inline Hint-System.
 SCRIPT_VERSION (semantisch, Git-Repo) ist aktuell 1.12.11; die 4-stellige AI-Versionierung
-ist davon getrennt und laeuft linear (zuletzt v0076).
+ist davon getrennt und laeuft linear (zuletzt v0077).
 
 Hinweis zur History: Die Versionstabelle unten ist zwischen v0023 und v0024 unvollstaendig.
 Einige Features (erweiterte Hint-Syntax mit Regex, Template-Compilation-Cache) sind im Code
@@ -38,6 +38,30 @@ Hauptfeatures:
 - --latest Flag fuer @* statt @pin Version-Constraints
 
 ## Aktuelle Arbeit
+
+v0077: kotlin-single (ohne Clikt) unter dem Kover-Ratchet; Build-Tests mit Kover
+
+Ausloeser: CI-Lauf zu Release 1.13.0 (gradleInit Actions #150): Job "Test kotlin-single"
+rot, "Test kotlin-single-clikt" gruen, alle anderen gruen. Ursache aus dem Log:
+koverVerify - "lines covered percentage is 45.098000, but expected minimum is 50".
+
+- kotlin-single/src/test/kotlin/MainTest.kt (Nicht-Clikt-Zweig): statt drei
+  assertDoesNotThrow-Tests fuer --help/--info jetzt sieben Tests ueber alle Zweige von
+  run(): Default-Lauf, --help/-h, --version/-V, --info/info, info --verbose, unbekannte
+  Option, main(). Ausgabe wird ueber System.setOut abgefangen und geprueft. Unbedeckt
+  bleiben nur die Manifest-Zweige fuer Git-/Build-Info (existieren nur in einem Jar mit
+  -PenableGitInfo=true). Der Clikt-Zweig war schon ueber 50 Prozent.
+- Warum die Suite auf bootes gruen war: TestTemplateGeneration und TestPerformance setzten
+  enable_kover=False in den Kontext - die Build-Tests liefen ohne das Gate, CI mit dem
+  Default true. enable_kover ist aus beiden Kontexten entfernt (Generatoren wenden die
+  TEMPLATE.md-Defaults an), TestPerformance nutzt dieselben Versionen/JDK wie die
+  Build-Tests (vorher Gradle 9.0 / Kotlin 2.2.0, kostete einen Distribution-Download).
+- Offen (ci.yml): GRADLE_VERSION "9.3.1" und KOTLIN_VERSION "2.3.10" hart gepinnt, nicht
+  im SSoT; setup-gradle pinnt den Wrapper auf 9.3.1 statt der Template-Version.
+  test-kotlin-multi ueberschreibt den Wrapper per 'gradle wrapper' im Projekt (alter Weg).
+  Deprecations: setup-java@v4 -> v5, Node-20-Actions. Kandidat fuer eine eigene Runde.
+- Betroffene Repos: gradleInit (test_gradleInit.py), gradleInitTemplates
+  (kotlin-single/src/test/kotlin/MainTest.kt).
 
 v0076: Gradle-Timeout in den Build-Tests
 
